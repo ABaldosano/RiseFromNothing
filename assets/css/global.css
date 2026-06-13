@@ -1,6 +1,6 @@
 /* ============================
-   RISE FROM NOTHING — STYLE v4
-   Cold concrete city idle UI
+   RISE FROM NOTHING — STYLE v5
+   Mobile-first Landscape Idle UI
    ============================ */
 
 @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
@@ -36,9 +36,12 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   --radius-pill:  999px;
   --font-disp:    'Bebas Neue', sans-serif;
   --font-body:    'Barlow', sans-serif;
+  /* control sizes — scale for thumb use */
+  --joystick-size: 120px;
+  --btn-action:    68px;
 }
 
-/* ── Base ── */
+/* ── Reset & Base ── */
 html, body {
   height: 100%;
   background: var(--bg);
@@ -48,10 +51,11 @@ html, body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
-  overflow-x: hidden;
+  overflow: hidden;
+  touch-action: none;
 }
 
-/* Concrete grain texture */
+/* Concrete grain */
 body::before {
   content: '';
   position: fixed;
@@ -65,134 +69,339 @@ body::before {
 #world-canvas {
   position: fixed;
   inset: 0;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   display: block;
   z-index: 0;
 }
 
 #app {
-  max-width: 480px;
-  margin: 0 auto;
-  min-height: 100vh;
-  position: relative;
+  position: fixed;
+  inset: 0;
   z-index: 1;
   pointer-events: none;
 }
 
-/* ── Header ── */
-#game-header {
-  position: sticky;
+/* ═══════════════════════════════════════
+   HUD — compact floating overlay
+   ═══════════════════════════════════════ */
+#hud {
+  position: absolute;
   top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 10px 12px;
+  gap: 8px;
+  pointer-events: none;
   z-index: 50;
-  background: rgba(21,24,28,0.82);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border-bottom: 2px solid var(--border2);
-  padding: 14px 16px 12px;
-  text-align: center;
+}
+
+#hud-left {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
   pointer-events: auto;
 }
 
-.header-top {
+#hud-right {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
+  gap: 6px;
+  pointer-events: auto;
 }
 
-.header-buttons {
+/* Capital chip — big green money counter like the reference */
+#capital-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0, 230, 118, 0.18);
+  border: 2px solid var(--green);
+  border-radius: var(--radius-pill);
+  padding: 5px 14px 5px 10px;
+  box-shadow: 0 2px 16px rgba(0,230,118,0.25), 0 1px 0 rgba(255,255,255,0.06) inset;
+}
+
+.chip-icon {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--green);
+  line-height: 1;
+}
+
+#capital-display {
+  font-family: var(--font-disp);
+  font-size: 26px;
+  letter-spacing: 2px;
+  color: var(--green);
+  line-height: 1;
+  text-shadow: 0 0 20px var(--green-glow);
+}
+
+/* Stats row chips */
+#stats-chips {
   display: flex;
   gap: 6px;
 }
 
-.menu-toggle {
-  font-size: 10px;
-  letter-spacing: 1px;
-  color: var(--text-dim);
-  padding: 4px 10px;
-  border: 1px solid var(--border2);
-  border-radius: var(--radius-pill);
-  transition: color 0.2s;
-}
-
-.menu-toggle:hover { color: var(--gold); }
-
-.game-title {
-  font-family: var(--font-disp);
-  font-size: 11px;
-  letter-spacing: 5px;
-  color: var(--text-dim);
-}
-
-.header-reset {
-  font-size: 10px;
-  letter-spacing: 1px;
-  color: var(--text-dim);
-  padding: 4px 10px;
-  border: 1px solid var(--border2);
-  border-radius: var(--radius-pill);
-  transition: color 0.2s;
-}
-
-.header-reset:hover { color: var(--red); }
-
-.capital-wrap { text-align: center; }
-
-.capital-label {
-  font-size: 9px;
-  letter-spacing: 4px;
-  color: var(--text-muted);
-}
-
-.capital-amount {
-  display: block;
-  font-family: var(--font-disp);
-  font-size: 52px;
-  line-height: 1;
-  color: var(--gold);
-  letter-spacing: 3px;
-  text-shadow: 0 0 40px var(--gold-glow), 0 2px 0 rgba(0,0,0,0.6);
-  animation: pulse-gold 3s ease-in-out infinite;
-}
-
-@keyframes pulse-gold {
-  0%, 100% { text-shadow: 0 0 30px var(--gold-glow); }
-  50%       { text-shadow: 0 0 60px var(--gold-glow), 0 0 16px rgba(240,165,0,0.08); }
-}
-
-.stats-row {
+.stat-chip {
   display: flex;
-  justify-content: center;
-  gap: 28px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
+  align-items: center;
+  gap: 4px;
+  background: rgba(21,24,28,0.72);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-pill);
+  padding: 3px 10px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
-.stat { display: flex; flex-direction: column; align-items: center; gap: 1px; }
-
-.stat-label {
+.stat-chip-label {
   font-size: 8px;
   letter-spacing: 2px;
   color: var(--text-dim);
   text-transform: uppercase;
 }
 
-.stat-value {
+.stat-chip-value {
   font-family: var(--font-disp);
-  font-size: 15px;
+  font-size: 13px;
   letter-spacing: 1px;
-  color: var(--green);
+  color: var(--gold);
 }
 
-/* ── Main ── */
+/* Job chip */
+#job-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(240,165,0,0.12);
+  border: 1px solid var(--gold-dim);
+  border-radius: var(--radius-pill);
+  padding: 4px 12px;
+}
+
+.job-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 6px var(--gold);
+  flex-shrink: 0;
+}
+
+#job-chip span:last-child {
+  font-family: var(--font-disp);
+  font-size: 13px;
+  letter-spacing: 2px;
+  color: var(--gold);
+}
+
+/* HUD icon buttons */
+.hud-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(21,24,28,0.85);
+  border: 2px solid var(--border2);
+  color: var(--text);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  transition: border-color 0.2s, background 0.2s;
+  pointer-events: auto;
+}
+
+.hud-btn:active {
+  background: var(--surface3);
+  border-color: var(--gold-dim);
+}
+
+.hud-btn-danger:active { border-color: var(--red); color: var(--red); }
+
+/* ═══════════════════════════════════════
+   World Controls — landscape-optimized
+   ═══════════════════════════════════════ */
+
+/* Joystick — left thumb zone */
+#joystick-base {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  width: var(--joystick-size);
+  height: var(--joystick-size);
+  border-radius: 50%;
+  background: rgba(255,255,255,0.05);
+  border: 2px solid rgba(255,255,255,0.12);
+  pointer-events: auto;
+  z-index: 60;
+  touch-action: none;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+#joystick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, rgba(240,165,0,0.6), rgba(240,165,0,0.25));
+  border: 2px solid var(--gold);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  box-shadow: 0 2px 12px rgba(240,165,0,0.3);
+}
+
+/* Action buttons — right thumb zone */
+#run-btn, #jump-btn, #interact-btn {
+  position: absolute;
+  z-index: 60;
+  pointer-events: auto;
+  font-family: var(--font-disp);
+  letter-spacing: 2px;
+  font-size: 12px;
+  width: var(--btn-action);
+  height: var(--btn-action);
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.14);
+  background: rgba(21,24,28,0.82);
+  color: var(--text-muted);
+  transition: all 0.15s;
+  touch-action: none;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.07);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Right cluster: RUN bottom-right, JUMP above-left */
+#run-btn {
+  right: 18px;
+  bottom: 18px;
+}
+
+#run-btn.active {
+  border-color: var(--gold);
+  color: var(--gold);
+  background: rgba(240,165,0,0.18);
+  box-shadow: 0 0 20px rgba(240,165,0,0.3), 0 4px 20px rgba(0,0,0,0.5);
+}
+
+#jump-btn {
+  right: 96px;
+  bottom: 52px;
+  font-size: 11px;
+  color: var(--blue);
+  border-color: rgba(68,138,255,0.3);
+}
+
+#jump-btn:active {
+  border-color: var(--blue);
+  background: rgba(68,138,255,0.18);
+  box-shadow: 0 0 16px rgba(68,138,255,0.3);
+}
+
+#interact-btn {
+  right: 18px;
+  bottom: 100px;
+  font-size: 20px;
+  border-color: var(--green-dim);
+  color: var(--green);
+  background: rgba(0,230,118,0.12);
+  box-shadow: 0 0 16px rgba(0,230,118,0.2), 0 4px 20px rgba(0,0,0,0.5);
+}
+
+#interact-btn:active {
+  background: rgba(0,230,118,0.25);
+}
+
+#interact-btn.hidden { display: none !important; }
+
+/* ═══════════════════════════════════════
+   Panel Sheet — bottom drawer
+   ═══════════════════════════════════════ */
+#panel-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 68%;
+  overflow-y: auto;
+  z-index: 100;
+  background: var(--bg);
+  border-top: 2px solid var(--border2);
+  border-radius: 18px 18px 0 0;
+  transform: translateY(100%);
+  transition: transform 0.3s cubic-bezier(0.32, 0, 0.15, 1);
+  pointer-events: auto;
+  box-shadow: 0 -12px 40px rgba(0,0,0,0.6);
+  scrollbar-width: none;
+}
+
+#panel-sheet.open { transform: translateY(0); }
+
+.panel-handle {
+  width: 44px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--border2);
+  margin: 10px auto 0;
+}
+
+/* Panel tab bar */
+#panel-tabs {
+  display: flex;
+  gap: 0;
+  padding: 8px 12px 0;
+  border-bottom: 1px solid var(--border2);
+}
+
+.panel-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px 4px;
+  font-family: var(--font-disp);
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  transition: color 0.2s, border-color 0.2s;
+  border-radius: 0;
+  background: none;
+  margin-bottom: -1px;
+}
+
+.panel-tab.active {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+}
+
+.ptab-icon { font-size: 14px; }
+.ptab-label { font-size: 11px; }
+
 #game-main {
-  padding: 14px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-bottom: 48px;
+  gap: 10px;
+  padding-bottom: 20px;
+}
+
+/* Sections — hide inactive tabs */
+#unlock-section,
+#business-section {
+  display: none;
 }
 
 /* ── Section card ── */
@@ -238,7 +447,7 @@ body::before {
 .job-tabs {
   display: flex;
   gap: 8px;
-  padding: 12px;
+  padding: 10px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -266,15 +475,15 @@ body::before {
 .actions-grid {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 0 12px 12px;
+  gap: 6px;
+  padding: 0 10px 10px;
 }
 
 .action-btn {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 18px;
+  padding: 14px 16px;
   background: var(--surface3);
   border: 2px solid var(--border2);
   border-radius: var(--radius-sm);
@@ -290,22 +499,11 @@ body::before {
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
 }
 
-.action-btn::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(120deg, transparent 30%, rgba(255,255,255,0.04) 50%, transparent 70%);
-  transform: translateX(-100%);
-  transition: transform 0.4s;
-}
-
 .action-btn:active {
   transform: scale(0.975);
   border-color: var(--gold-dim);
   background: var(--surface4);
 }
-
-.action-btn:active::after { transform: translateX(100%); }
 
 .action-name  { font-weight: 600; }
 
@@ -318,10 +516,10 @@ body::before {
 
 /* ── Unlock Cards ── */
 .unlock-list {
-  padding: 12px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .all-unlocked {
@@ -334,57 +532,40 @@ body::before {
 .unlock-card {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px;
+  gap: 10px;
+  padding: 12px;
   background: var(--surface3);
   border: 2px solid var(--border2);
   border-radius: var(--radius-sm);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
 }
 
 .unlock-left {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 8px;
   flex: 1;
   min-width: 0;
 }
 
-.unlock-emoji {
-  font-size: 26px;
-  flex-shrink: 0;
-  line-height: 1;
-  margin-top: 2px;
-}
-
-.unlock-info { flex: 1; min-width: 0; }
+.unlock-emoji { font-size: 24px; flex-shrink: 0; line-height: 1; margin-top: 2px; }
+.unlock-info  { flex: 1; min-width: 0; }
 
 .unlock-name {
   font-family: var(--font-disp);
-  font-size: 17px;
+  font-size: 16px;
   letter-spacing: 2px;
   color: var(--text);
 }
 
-.unlock-desc {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-style: italic;
-  margin: 1px 0 3px;
-}
-
-.unlock-income {
-  font-size: 11px;
-  color: var(--green);
-  margin-bottom: 6px;
-}
+.unlock-desc  { font-size: 10px; color: var(--text-muted); font-style: italic; margin: 1px 0 3px; }
+.unlock-income { font-size: 11px; color: var(--green); margin-bottom: 5px; }
 
 .unlock-progress {
   height: 4px;
   background: var(--bg);
   border-radius: var(--radius-pill);
   overflow: hidden;
-  margin-bottom: 4px;
+  margin-bottom: 3px;
 }
 
 .unlock-progress-fill {
@@ -394,18 +575,14 @@ body::before {
   transition: width 0.4s;
 }
 
-.unlock-cost-label {
-  font-size: 10px;
-  color: var(--text-dim);
-  letter-spacing: 0.5px;
-}
+.unlock-cost-label { font-size: 10px; color: var(--text-dim); }
 
 .btn-unlock {
   flex-shrink: 0;
   font-family: var(--font-disp);
-  font-size: 12px;
+  font-size: 11px;
   letter-spacing: 2px;
-  padding: 10px 14px;
+  padding: 10px 12px;
   border-radius: var(--radius-pill);
   border: 2px solid var(--gold-dim);
   background: rgba(240,165,0,0.08);
@@ -426,18 +603,18 @@ body::before {
   background: rgba(240,165,0,0.18);
 }
 
-/* ── Business Category Header (v4) ── */
+/* ── Business Category Header ── */
 .biz-category-header {
   font-family: var(--font-disp);
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: 4px;
   color: var(--text-dim);
-  padding: 8px 4px 4px;
+  padding: 6px 4px 3px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 2px;
 }
 
-/* ── Vehicle Badge (v4) ── */
+/* ── Vehicle Badge ── */
 .vehicle-badge {
   font-family: var(--font-disp);
   font-size: 9px;
@@ -445,7 +622,7 @@ body::before {
   color: var(--cyan);
   background: rgba(38,198,218,0.10);
   border: 1px solid var(--cyan-dim);
-  padding: 2px 7px;
+  padding: 2px 6px;
   border-radius: var(--radius-pill);
   vertical-align: middle;
   margin-left: 4px;
@@ -453,14 +630,14 @@ body::before {
 
 /* ── Business Cards ── */
 .business-grid {
-  padding: 12px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .business-card {
-  padding: 14px;
+  padding: 12px;
   background: var(--surface3);
   border: 2px solid var(--border2);
   border-radius: var(--radius-sm);
@@ -473,7 +650,6 @@ body::before {
   background: rgba(0,230,118,0.025);
 }
 
-/* v4: transport owned cards get a cyan tint */
 .business-card.owned[id^="biz-card-bicycle"],
 .business-card.owned[id^="biz-card-motorcycle"],
 .business-card.owned[id^="biz-card-delivery"],
@@ -485,35 +661,21 @@ body::before {
 .business-header {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: 10px;
 }
 
-.business-emoji {
-  font-size: 32px;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.business-info { flex: 1; min-width: 0; }
+.business-emoji { font-size: 28px; line-height: 1; flex-shrink: 0; }
+.business-info  { flex: 1; min-width: 0; }
 
 .business-name {
   font-family: var(--font-disp);
-  font-size: 18px;
+  font-size: 16px;
   letter-spacing: 2px;
   color: var(--text);
 }
 
-.business-rate {
-  font-size: 11px;
-  color: var(--green);
-  margin: 1px 0;
-}
-
-.business-desc {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-style: italic;
-}
+.business-rate  { font-size: 10px; color: var(--green); margin: 1px 0; }
+.business-desc  { font-size: 10px; color: var(--text-muted); font-style: italic; }
 
 .business-owned-badge {
   flex-shrink: 0;
@@ -523,24 +685,23 @@ body::before {
   color: var(--green);
   background: rgba(0,230,118,0.09);
   border: 1px solid var(--green-dim);
-  padding: 4px 12px;
+  padding: 3px 10px;
   border-radius: var(--radius-pill);
-  margin-top: 2px;
 }
 
 /* Business timer */
-.biz-timer-wrap { margin-top: 12px; }
+.biz-timer-wrap { margin-top: 10px; }
 
 .biz-timer-label {
   font-size: 9px;
   letter-spacing: 2px;
   color: var(--text-dim);
-  margin-bottom: 5px;
+  margin-bottom: 4px;
   text-transform: uppercase;
 }
 
 .biz-timer-bar {
-  height: 6px;
+  height: 5px;
   background: var(--bg);
   border-radius: var(--radius-pill);
   overflow: hidden;
@@ -558,11 +719,11 @@ body::before {
 .btn-buy {
   display: block;
   width: 100%;
-  margin-top: 12px;
+  margin-top: 10px;
   font-family: var(--font-disp);
   font-size: 13px;
   letter-spacing: 2px;
-  padding: 13px;
+  padding: 12px;
   border-radius: var(--radius-pill);
   border: 2px solid var(--border2);
   background: var(--surface2);
@@ -585,12 +746,12 @@ body::before {
 
 /* ── Worker Section ── */
 .worker-section {
-  margin-top: 10px;
+  margin-top: 8px;
   border-top: 1px solid var(--border2);
-  padding-top: 10px;
+  padding-top: 8px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .worker-row {
@@ -600,10 +761,10 @@ body::before {
   gap: 8px;
 }
 
-.worker-info { display: flex; flex-direction: column; gap: 2px; }
+.worker-info { display: flex; flex-direction: column; gap: 1px; }
 
 .worker-label {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-dim);
   letter-spacing: 1px;
   text-transform: uppercase;
@@ -611,16 +772,16 @@ body::before {
 
 .worker-count {
   font-family: var(--font-disp);
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text);
 }
 
 .worker-level-badge {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 1px;
   text-transform: uppercase;
-  padding: 2px 8px;
+  padding: 2px 7px;
   border-radius: var(--radius-pill);
 }
 .worker-level-badge.lv1 { background: rgba(255,255,255,0.06); color: var(--text-dim); }
@@ -629,16 +790,16 @@ body::before {
 
 .btn-worker {
   font-family: var(--font-disp);
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: 1px;
-  padding: 8px 14px;
+  padding: 7px 12px;
   border-radius: var(--radius-pill);
   border: 2px solid var(--border2);
   background: transparent;
   color: var(--text-dim);
   white-space: nowrap;
   transition: all 0.2s;
-  min-width: 100px;
+  min-width: 90px;
   text-align: center;
 }
 
@@ -656,7 +817,7 @@ body::before {
 .btn-worker:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .worker-effective {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--green);
   opacity: 0.7;
   letter-spacing: 0.5px;
@@ -674,7 +835,7 @@ body::before {
 .float-text {
   position: absolute;
   font-family: var(--font-disp);
-  font-size: 22px;
+  font-size: 20px;
   letter-spacing: 2px;
   color: var(--green);
   text-shadow: 0 2px 12px var(--green-glow);
@@ -689,9 +850,9 @@ body::before {
 }
 
 @keyframes floatUp {
-  0%   { opacity: 1;   transform: translateY(0)     scale(1);   }
-  20%  { opacity: 1;   transform: translateY(-10px)  scale(1.1); }
-  100% { opacity: 0;   transform: translateY(-70px)  scale(0.9); }
+  0%   { opacity: 1; transform: translateY(0)     scale(1);   }
+  20%  { opacity: 1; transform: translateY(-10px)  scale(1.1); }
+  100% { opacity: 0; transform: translateY(-70px)  scale(0.9); }
 }
 
 /* ── Offline Modal ── */
@@ -721,10 +882,10 @@ body::before {
   background: var(--surface2);
   border: 2px solid var(--gold-dim);
   border-radius: var(--radius);
-  padding: 32px 24px 28px;
+  padding: 28px 22px 24px;
   text-align: center;
   width: 100%;
-  max-width: 320px;
+  max-width: 300px;
   box-shadow: 0 0 60px rgba(240,165,0,0.1), 0 20px 60px rgba(0,0,0,0.7);
   animation: modalIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -734,11 +895,11 @@ body::before {
   to   { opacity: 1; transform: scale(1)    translateY(0);    }
 }
 
-.modal-icon   { font-size: 52px; margin-bottom: 10px; }
+.modal-icon   { font-size: 48px; margin-bottom: 10px; }
 
 .modal-title {
   font-family: var(--font-disp);
-  font-size: 30px;
+  font-size: 28px;
   letter-spacing: 4px;
   color: var(--gold);
   margin-bottom: 8px;
@@ -748,16 +909,16 @@ body::before {
   color: var(--text-muted);
   font-size: 13px;
   line-height: 1.6;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
 .modal-amount {
   font-family: var(--font-disp);
-  font-size: 44px;
+  font-size: 40px;
   color: var(--green);
   letter-spacing: 3px;
   text-shadow: 0 0 40px var(--green-glow);
-  margin-bottom: 22px;
+  margin-bottom: 20px;
 }
 
 .btn-primary {
@@ -765,7 +926,7 @@ body::before {
   font-family: var(--font-disp);
   font-size: 15px;
   letter-spacing: 3px;
-  padding: 14px;
+  padding: 13px;
   border-radius: var(--radius-pill);
   border: 2px solid var(--gold-dim);
   background: rgba(240,165,0,0.12);
@@ -782,147 +943,244 @@ body::before {
 ::-webkit-scrollbar { display: none; }
 * { scrollbar-width: none; }
 
-/* ── World Controls ── */
-#joystick-base {
-  position: fixed;
-  left: 24px;
-  bottom: 28px;
-  width: 100px;
-  height: 100px;
-  border-radius: 50%;
-  background: rgba(255,255,255,0.06);
-  border: 2px solid var(--border2);
-  pointer-events: auto;
-  z-index: 60;
-  touch-action: none;
-}
-
-#joystick-knob {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: rgba(240,165,0,0.35);
-  border: 2px solid var(--gold-dim);
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-}
-
-#run-btn, #interact-btn {
-  position: fixed;
-  right: 24px;
-  z-index: 60;
-  pointer-events: auto;
-  font-family: var(--font-disp);
-  letter-spacing: 2px;
-  font-size: 11px;
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  border: 2px solid var(--border2);
-  background: rgba(255,255,255,0.06);
-  color: var(--text-muted);
-  transition: all 0.2s;
-}
-
-#run-btn { bottom: 28px; }
-
-#run-btn.active {
-  border-color: var(--gold-dim);
-  color: var(--gold);
-  background: rgba(240,165,0,0.14);
-}
-
-#interact-btn {
-  bottom: 104px;
-  border-color: var(--green-dim);
-  color: var(--green);
-  background: rgba(0,230,118,0.10);
-}
-
-#interact-btn.hidden { display: none; }
-
-/* ── Panel Sheet ── */
-#panel-sheet {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  max-width: 480px;
-  margin: 0 auto;
-  max-height: 78vh;
-  overflow-y: auto;
-  z-index: 100;
-  background: var(--bg);
-  border-top: 2px solid var(--border2);
-  border-radius: 18px 18px 0 0;
-  transform: translateY(100%);
-  transition: transform 0.3s ease;
-  pointer-events: auto;
-  box-shadow: 0 -10px 40px rgba(0,0,0,0.5);
-}
-
-#panel-sheet.open { transform: translateY(0); }
-
-.panel-handle {
-  width: 48px;
-  height: 5px;
-  border-radius: var(--radius-pill);
-  background: var(--border2);
-  margin: 10px auto;
-}
-
-#panel-sheet #game-main {
-  padding-bottom: 24px;
-}
-
-/* ── Force landscape on mobile portrait ── */
+/* ═══════════════════════════════════════
+   LANDSCAPE — Force CSS rotation when
+   user is in portrait. Controls are
+   already in absolute positioning
+   relative to the rotated body.
+   ═══════════════════════════════════════ */
 @media screen and (orientation: portrait) and (max-width: 900px) {
-  html, body {
+  html {
     width: 100vh;
     height: 100vw;
     overflow: hidden;
   }
   body {
+    width: 100vh;
+    height: 100vw;
     position: absolute;
     top: 0;
     left: 100%;
     transform-origin: top left;
     transform: rotate(90deg);
+    overflow: hidden;
   }
+  /* Canvas fills the rotated body dimensions → renders in landscape */
   #world-canvas {
-    width: 100% !important;
-    height: 100% !important;
-  }
-  #app {
-    min-height: 100% !important;
+    position: absolute;
+    width: 100%;
     height: 100%;
   }
+  /* Increase HUD font sizes slightly for landscape in small screens */
+  #capital-display { font-size: 22px; }
+  #panel-sheet { max-height: 60%; }
 }
 
-/* ── Jump Button ── */
-#jump-btn {
+/* ── Landscape real (phone held sideways) ── */
+@media screen and (orientation: landscape) {
+  /* Slightly reduce panel height so controls stay visible */
+  #panel-sheet { max-height: 65%; }
+}
+
+/* ── Small landscape screens (short height) ── */
+@media screen and (orientation: landscape) and (max-height: 420px) {
+  #capital-display { font-size: 20px; }
+  :root {
+    --joystick-size: 100px;
+    --btn-action: 58px;
+  }
+  #jump-btn  { right: 82px; bottom: 44px; }
+  #interact-btn { bottom: 86px; }
+  #panel-sheet { max-height: 58%; }
+}
+
+/* =========================================================
+   MOBILE UI OVERHAUL
+   ========================================================= */
+
+#rotate-device-overlay {
   position: fixed;
-  right: 100px;
-  bottom: 28px;
-  z-index: 60;
-  pointer-events: auto;
+  inset: 0;
+  z-index: 999999;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at center,
+      rgba(38,198,218,.12),
+      rgba(7,7,15,.96));
+  backdrop-filter: blur(14px);
+}
+
+.rotate-card {
+  width: min(90vw, 380px);
+  padding: 32px;
+  border-radius: 28px;
+  text-align: center;
+  background: rgba(21,24,28,.95);
+  border: 1px solid rgba(38,198,218,.35);
+  box-shadow: 0 0 40px rgba(38,198,218,.15);
+}
+
+.rotate-icon {
+  font-size: 56px;
+  margin-bottom: 16px;
+}
+
+.rotate-title {
   font-family: var(--font-disp);
   letter-spacing: 2px;
-  font-size: 11px;
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  border: 2px solid var(--border2);
-  background: rgba(255,255,255,0.06);
-  color: var(--text-muted);
-  transition: all 0.2s;
+  font-size: 28px;
+  color: var(--cyan);
 }
 
-#jump-btn:active {
-  border-color: var(--blue);
-  color: var(--blue);
-  background: rgba(68,138,255,0.14);
+.rotate-subtitle {
+  margin-top: 8px;
+  color: var(--text);
+}
+
+/* ==========================
+   MOBILE LANDSCAPE
+   ========================== */
+
+@media (max-width: 950px) {
+
+  #hud {
+    padding: 12px;
+  }
+
+  #capital-chip {
+    backdrop-filter: blur(18px);
+    background: rgba(0,230,118,.14);
+    border: 2px solid rgba(0,230,118,.45);
+  }
+
+  #stats-chips {
+    gap: 8px;
+  }
+
+  .stat-chip {
+    backdrop-filter: blur(18px);
+    background: rgba(15,18,24,.78);
+  }
+
+  #menu-btn,
+  .hud-btn {
+    width: 54px;
+    height: 54px;
+    border-radius: 18px;
+    background: rgba(15,18,24,.86);
+    border: 1px solid rgba(38,198,218,.25);
+    backdrop-filter: blur(18px);
+  }
+
+  #joystick-base {
+    width: 150px !important;
+    height: 150px !important;
+    left: 20px !important;
+    bottom: 20px !important;
+
+    border-radius: 50%;
+    background:
+      radial-gradient(circle,
+        rgba(38,198,218,.18),
+        rgba(15,18,24,.92));
+
+    border: 2px solid rgba(38,198,218,.35);
+    backdrop-filter: blur(22px);
+
+    box-shadow:
+      0 0 30px rgba(38,198,218,.15),
+      inset 0 0 30px rgba(38,198,218,.08);
+  }
+
+  #joystick-knob {
+    width: 68px !important;
+    height: 68px !important;
+    border-radius: 50%;
+    background: linear-gradient(
+      180deg,
+      rgba(38,198,218,.95),
+      rgba(20,120,140,.95)
+    );
+    box-shadow: 0 0 18px rgba(38,198,218,.35);
+  }
+
+  #run-btn,
+  #jump-btn,
+  #interact-btn {
+    width: 86px !important;
+    height: 86px !important;
+    border-radius: 26px !important;
+
+    background:
+      linear-gradient(
+        180deg,
+        rgba(26,30,38,.96),
+        rgba(15,18,24,.96)
+      );
+
+    border: 2px solid rgba(38,198,218,.28);
+
+    color: white;
+    font-family: var(--font-disp);
+    font-size: 20px;
+    letter-spacing: 1px;
+
+    backdrop-filter: blur(20px);
+
+    box-shadow:
+      0 0 20px rgba(38,198,218,.12),
+      inset 0 1px 0 rgba(255,255,255,.08);
+  }
+
+  #run-btn {
+    right: 20px !important;
+    bottom: 20px !important;
+  }
+
+  #jump-btn {
+    right: 118px !important;
+    bottom: 20px !important;
+  }
+
+  #interact-btn {
+    right: 20px !important;
+    bottom: 118px !important;
+  }
+
+  #panel-sheet {
+    width: 100%;
+    max-width: 100%;
+    border-top-left-radius: 28px;
+    border-top-right-radius: 28px;
+
+    background:
+      linear-gradient(
+        180deg,
+        rgba(18,21,27,.98),
+        rgba(11,13,18,.98)
+      );
+
+    backdrop-filter: blur(24px);
+
+    border-top: 1px solid rgba(38,198,218,.20);
+  }
+
+  #panel-tabs {
+    padding: 12px;
+    gap: 8px;
+  }
+
+  .panel-tab {
+    min-height: 64px;
+    border-radius: 18px;
+    background: rgba(21,24,28,.85);
+    backdrop-filter: blur(16px);
+  }
+
+  .panel-tab.active {
+    border: 1px solid rgba(38,198,218,.35);
+    box-shadow: 0 0 16px rgba(38,198,218,.12);
+  }
 }

@@ -16,43 +16,60 @@
 
   <div id="app">
 
-    <!-- ── Header / HUD ── -->
-    <header id="game-header">
-      <div class="header-top">
-        <span class="game-title">RISE FROM NOTHING</span>
-        <div class="header-buttons">
-          <button class="menu-toggle" onclick="togglePanel()">MENU</button>
-          <button class="header-reset" onclick="resetGame()">RESET</button>
-        </div>
-      </div>
-      <div class="capital-wrap">
-        <div class="capital-label">CAPITAL</div>
-        <span class="capital-amount" id="capital-display">₱0</span>
-      </div>
-      <div class="stats-row">
-        <div class="stat">
-          <span class="stat-label">Total Earned</span>
-          <span class="stat-value" id="total-earned">₱0</span>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Income / Sec</span>
-          <span class="stat-value" id="income-per-sec">₱0/s</span>
-        </div>
-      </div>
-    </header>
-
     <!-- ── Floating text layer ── -->
     <div id="float-container"></div>
+
+    <!-- ── HUD Overlay ── -->
+    <div id="hud">
+      <div id="hud-left">
+        <div id="capital-chip">
+          <span class="chip-icon">₱</span>
+          <span id="capital-display">0</span>
+        </div>
+        <div id="stats-chips">
+          <div class="stat-chip">
+            <span class="stat-chip-label">EARNED</span>
+            <span class="stat-chip-value" id="total-earned">₱0</span>
+          </div>
+          <div class="stat-chip">
+            <span class="stat-chip-label">RATE</span>
+            <span class="stat-chip-value" id="income-per-sec">₱0/s</span>
+          </div>
+        </div>
+      </div>
+      <div id="hud-right">
+        <div id="job-chip">
+          <span class="job-chip-dot"></span>
+          <span id="current-job-name">Beggar</span>
+        </div>
+        <button class="hud-btn" id="menu-btn" onclick="togglePanel()">☰</button>
+        <button class="hud-btn hud-btn-danger" onclick="resetGame()">↺</button>
+      </div>
+    </div>
 
     <!-- ── World Controls ── -->
     <div id="joystick-base"><div id="joystick-knob"></div></div>
     <button id="run-btn">RUN</button>
     <button id="jump-btn">JUMP</button>
-    <button id="interact-btn" class="hidden" onclick="interactWithBusiness()">INTERACT</button>
+    <button id="interact-btn" class="hidden" onclick="interactWithBusiness()">!</button>
 
-    <!-- ── Panel Sheet (job / upgrades / businesses) ── -->
+    <!-- ── Panel Sheet ── -->
     <div id="panel-sheet">
       <div class="panel-handle" onclick="togglePanel()"></div>
+
+      <!-- Panel Tab Nav -->
+      <div id="panel-tabs">
+        <button class="panel-tab active" onclick="switchPanelTab('job', this)">
+          <span class="ptab-icon">👤</span><span class="ptab-label">JOB</span>
+        </button>
+        <button class="panel-tab" onclick="switchPanelTab('unlock', this)">
+          <span class="ptab-icon">🔓</span><span class="ptab-label">CAREER</span>
+        </button>
+        <button class="panel-tab" onclick="switchPanelTab('business', this)">
+          <span class="ptab-icon">🏢</span><span class="ptab-label">BIZ</span>
+        </button>
+      </div>
+
       <main id="game-main">
 
         <!-- Job Section -->
@@ -60,9 +77,9 @@
           <div class="section-header">
             <span class="section-icon">👤</span>
             <h2 class="section-title">YOUR JOB</h2>
-            <span class="section-badge" id="current-job-name">Beggar</span>
+            <span class="section-badge" id="current-job-name-panel">Beggar</span>
           </div>
-          <div class="job-tabs"   id="job-tabs"></div>
+          <div class="job-tabs" id="job-tabs"></div>
           <div class="actions-grid" id="actions-grid"></div>
         </section>
 
@@ -101,7 +118,6 @@
 
   </div>
 
-  <!-- Scripts: data → audio → save → ui → game (init last), world as module -->
   <script src="assets/js/data.js"></script>
   <script src="assets/js/audio.js"></script>
   <script src="assets/js/save.js"></script>
@@ -109,8 +125,55 @@
   <script src="assets/js/game.js"></script>
   <script type="module" src="assets/js/world.js"></script>
   <script>
-    // Boot
     window.addEventListener('DOMContentLoaded', initGame);
+
+    // Panel tab switcher
+    function switchPanelTab(tab, btn) {
+      document.querySelectorAll('.panel-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      ['job-section','unlock-section','business-section'].forEach(id => {
+        document.getElementById(id).style.display = 'none';
+      });
+      const map = { job: 'job-section', unlock: 'unlock-section', business: 'business-section' };
+      const el = document.getElementById(map[tab]);
+      if (el) el.style.display = '';
+    }
   </script>
+  <script>
+(() => {
+  const lockLandscape = async () => {
+    try {
+      if (screen.orientation?.lock) {
+        await screen.orientation.lock('landscape');
+      }
+    } catch (e) {}
+  };
+
+  document.addEventListener('click', lockLandscape, { once: true });
+  document.addEventListener('touchstart', lockLandscape, { once: true });
+
+  const rotateOverlay = document.createElement('div');
+  rotateOverlay.id = 'rotate-device-overlay';
+  rotateOverlay.innerHTML = `
+    <div class="rotate-card">
+      <div class="rotate-icon">📱</div>
+      <div class="rotate-title">Rotate Device</div>
+      <div class="rotate-subtitle">
+        Enable auto-rotate and switch to landscape to play.
+      </div>
+    </div>
+  `;
+  document.body.appendChild(rotateOverlay);
+
+  const updateOrientation = () => {
+    const portrait = window.innerHeight > window.innerWidth;
+    rotateOverlay.style.display = portrait ? 'flex' : 'none';
+  };
+
+  window.addEventListener('resize', updateOrientation);
+  window.addEventListener('orientationchange', updateOrientation);
+  updateOrientation();
+})();
+</script>
 </body>
 </html>
