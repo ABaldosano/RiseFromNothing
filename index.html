@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#07070f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Rise From Nothing</title>
+  <link rel="stylesheet" href="assets/css/global.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ── Header ── -->
+    <header id="game-header">
+      <div class="header-top">
+        <span class="game-title">RISE FROM NOTHING</span>
+        <button class="header-reset" onclick="resetGame()">RESET</button>
+      </div>
+      <div class="capital-wrap">
+        <div class="capital-label">CAPITAL</div>
+        <span class="capital-amount" id="capital-display">₱0</span>
+      </div>
+      <div class="stats-row">
+        <div class="stat">
+          <span class="stat-label">Total Earned</span>
+          <span class="stat-value" id="total-earned">₱0</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Income / Sec</span>
+          <span class="stat-value" id="income-per-sec">₱0/s</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ── Floating text layer ── -->
+    <div id="float-container"></div>
+
+    <!-- ── Main content ── -->
+    <main id="game-main">
+
+      <!-- Job Section -->
+      <section class="game-section" id="job-section">
+        <div class="section-header">
+          <span class="section-icon">👤</span>
+          <h2 class="section-title">YOUR JOB</h2>
+          <span class="section-badge" id="current-job-name">Beggar</span>
+        </div>
+        <div class="job-tabs"   id="job-tabs"></div>
+        <div class="actions-grid" id="actions-grid"></div>
+      </section>
+
+      <!-- Career Upgrades -->
+      <section class="game-section" id="unlock-section">
+        <div class="section-header">
+          <span class="section-icon">🔓</span>
+          <h2 class="section-title">CAREER UPGRADES</h2>
+        </div>
+        <div class="unlock-list" id="unlock-list"></div>
+      </section>
+
+      <!-- Businesses -->
+      <section class="game-section" id="business-section">
+        <div class="section-header">
+          <span class="section-icon">🏢</span>
+          <h2 class="section-title">BUSINESSES</h2>
+        </div>
+        <div class="business-grid" id="business-grid"></div>
+      </section>
+
+    </main>
+
+    <!-- ── Offline Modal ── -->
+    <div id="offline-modal" class="modal hidden">
+      <div class="modal-overlay" onclick="closeOfflineModal()"></div>
+      <div class="modal-card">
+        <div class="modal-icon">💰</div>
+        <h3 class="modal-title">WELCOME BACK</h3>
+        <p class="modal-text">Your businesses kept grinding while you were away.</p>
+        <div class="modal-amount" id="offline-amount">+₱0</div>
+        <button class="btn-primary" onclick="closeOfflineModal()">COLLECT</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Scripts: data → save → ui → game (init last) -->
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/save.js"></script>
+  <script src="assets/js/ui.js"></script>
+  <script src="assets/js/game.js"></script>
+  <script>
+    // Boot
+    window.addEventListener('DOMContentLoaded', initGame);
+  </script>
+</body>
+</html>
