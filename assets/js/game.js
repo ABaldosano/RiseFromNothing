@@ -1,5 +1,5 @@
 // ============================
-// RISE FROM NOTHING — GAME v2
+// RISE FROM NOTHING — GAME v4
 // ============================
 
 const G = {
@@ -14,6 +14,9 @@ const G = {
   bizProgress:      {},
   offlineEarned:    0,
   rafId:            null,
+  // v4 transport state
+  fleetLevel:       {},   // bizId -> 1|2|3  (vehicle tier)
+  activeRoutes:     {},   // bizId -> routeIndex (cycling through waypoints)
 };
 
 // ── Init ──────────────────────────────────────────────
@@ -28,6 +31,7 @@ function initGame() {
     G.ownedBusinesses  = saved.ownedBusinesses  ?? [];
     G.workers          = saved.workers          ?? {};
     G.workerLevel      = saved.workerLevel      ?? {};
+    G.fleetLevel       = saved.fleetLevel       ?? {};
 
     if (saved.savedAt && G.ownedBusinesses.length > 0) {
       const offline = calcOfflineEarnings(G.ownedBusinesses, saved.savedAt, G.workers, G.workerLevel);
@@ -70,15 +74,21 @@ function togglePanel() {
 }
 
 function interactWithBusiness() {
+  const panel = document.getElementById('panel-sheet');
+  playClick();
+  if (panel.classList.contains('open')) {
+    panel.classList.remove('open');
+    return;
+  }
+  panel.classList.add('open');
   const btn = document.getElementById('interact-btn');
   const bizId = btn?.dataset.biz;
-  if (!bizId) return;
-  playClick();
-  document.getElementById('panel-sheet').classList.add('open');
-  setTimeout(() => {
-    const card = document.getElementById('biz-card-' + bizId);
-    if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, 50);
+  if (bizId) {
+    setTimeout(() => {
+      const card = document.getElementById('biz-card-' + bizId);
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+  }
 }
 
 // ── rAF tick ──────────────────────────────────────────
@@ -134,6 +144,9 @@ function buyBusiness(bizId) {
   G.ownedBusinesses.push(bizId);
   if (!G.workers[bizId])     G.workers[bizId]     = 0;
   if (!G.workerLevel[bizId]) G.workerLevel[bizId] = 1;
+  if (biz.category === 'transport') {
+    if (!G.fleetLevel[bizId]) G.fleetLevel[bizId] = 1;
+  }
   _startBizTimer(bizId);
   playPurchase();
   saveGame(G);
@@ -183,6 +196,29 @@ function _workerHireCost(bizId) {
   return Math.floor(biz.workerCost * Math.pow(1.5, current));
 }
 
+// ── Fleet Upgrade (v4 transport) ──────────────────────
+// Fleet level boosts income multiplier: lv1 1x, lv2 1.6x, lv3 2.5x
+const FLEET_LEVEL_NAMES   = ['', 'Standard', 'Upgraded', 'Premium'];
+const FLEET_LEVEL_MULT    = [1, 1, 1.6, 2.5];
+
+function upgradeFleet(bizId) {
+  const biz   = BUSINESSES[bizId];
+  if (!biz || biz.category !== 'transport') return;
+  const level = G.fleetLevel[bizId] || 1;
+  if (level >= 3) return;
+  const cost = biz.upgradeCosts[level - 1];
+  if (G.capital < cost) return;
+
+  G.capital          -= cost;
+  G.fleetLevel[bizId] = level + 1;
+
+  playUpgrade();
+  saveGame(G);
+  renderStats();
+  renderBusinessSection();
+  window.WorldAPI?.updateWorld(G, BUSINESSES);
+}
+
 // ── Business timer ────────────────────────────────────
 function _startBizTimer(bizId) {
   const biz = BUSINESSES[bizId];
@@ -211,7 +247,11 @@ function _calcBizIncome(bizId) {
   const wLevel     = G.workerLevel[bizId] || 1;
   const workerMult = 1 + wCount * biz.workerBonus;
   const levelMult  = [1, 1.5, 2][wLevel - 1];
-  return Math.floor(base * workerMult * levelMult);
+  // v4: fleet multiplier for transport businesses
+  const fleetMult  = biz.category === 'transport'
+    ? FLEET_LEVEL_MULT[G.fleetLevel[bizId] || 1]
+    : 1;
+  return Math.floor(base * workerMult * levelMult * fleetMult);
 }
 
 // ── Helpers ───────────────────────────────────────────
@@ -233,7 +273,10 @@ function getIncomePerSec() {
     const wLevel     = G.workerLevel[bizId] || 1;
     const workerMult = 1 + wCount * biz.workerBonus;
     const levelMult  = [1, 1.5, 2][wLevel - 1];
-    total += (avg * workerMult * levelMult) / (biz.intervalMs / 1000);
+    const fleetMult  = biz.category === 'transport'
+      ? FLEET_LEVEL_MULT[G.fleetLevel[bizId] || 1]
+      : 1;
+    total += (avg * workerMult * levelMult * fleetMult) / (biz.intervalMs / 1000);
   });
   return total;
 }

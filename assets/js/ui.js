@@ -1,5 +1,5 @@
 // ============================
-// RISE FROM NOTHING — UI  v2
+// RISE FROM NOTHING — UI  v4
 // ============================
 
 const LEVEL_NAMES = ['', 'Basic Staff', 'Trained Staff', 'Expert Staff'];
@@ -107,91 +107,139 @@ function renderBusinessSection() {
   const grid = document.getElementById('business-grid');
   grid.innerHTML = '';
 
-  BIZ_ORDER.forEach(bizId => {
-    const biz       = BUSINESSES[bizId];
-    const owned     = G.ownedBusinesses.includes(bizId);
-    const canAfford = !owned && G.capital >= biz.cost;
+  // Category headers
+  const retailBizIds    = BIZ_ORDER.filter(id => BUSINESSES[id].category === 'retail');
+  const transportBizIds = BIZ_ORDER.filter(id => BUSINESSES[id].category === 'transport');
 
-    const card = document.createElement('div');
-    card.className = 'business-card' + (owned ? ' owned' : '');
-    card.id        = 'biz-card-' + bizId;
+  _renderCategoryHeader(grid, '🏪 RETAIL');
+  retailBizIds.forEach(bizId => _renderBizCard(grid, bizId));
 
-    const intervalSec = (biz.intervalMs / 1000).toFixed(0);
-    const rateLabel   = `${CURRENCY}${biz.minIncome}–${CURRENCY}${biz.maxIncome} / ${intervalSec}s`;
+  _renderCategoryHeader(grid, '🚚 TRANSPORTATION');
+  transportBizIds.forEach(bizId => _renderBizCard(grid, bizId));
+}
 
-    let footer = '';
-    if (owned) {
-      const wCount    = G.workers[bizId]     || 0;
-      const wLevel    = G.workerLevel[bizId] || 1;
-      const hireCost  = _workerHireCost(bizId);
-      const canHire   = wCount < biz.workerMax && G.capital >= hireCost;
-      const maxed     = wCount >= biz.workerMax;
-      const canUpgrade   = wLevel < 3 && G.capital >= biz.upgradeCosts[wLevel - 1];
-      const upgradeMaxed = wLevel >= 3;
-      const upgradeCost  = wLevel < 3 ? biz.upgradeCosts[wLevel - 1] : 0;
+function _renderCategoryHeader(container, label) {
+  const h = document.createElement('div');
+  h.className = 'biz-category-header';
+  h.textContent = label;
+  container.appendChild(h);
+}
 
-      // effective income range with current workers/level
-      const workerMult = 1 + wCount * biz.workerBonus;
-      const levelMult  = [1, 1.5, 2][wLevel - 1];
-      const effMin = Math.floor(biz.minIncome * workerMult * levelMult);
-      const effMax = Math.floor(biz.maxIncome * workerMult * levelMult);
+function _renderBizCard(container, bizId) {
+  const biz        = BUSINESSES[bizId];
+  const owned      = G.ownedBusinesses.includes(bizId);
+  const canAfford  = !owned && G.capital >= biz.cost;
+  const isTransport = biz.category === 'transport';
 
-      footer = `
-        <div class="biz-timer-wrap">
-          <div class="biz-timer-bar">
-            <div class="biz-timer-fill" id="biz-bar-${bizId}" style="width:0%"></div>
+  const card = document.createElement('div');
+  card.className = 'business-card' + (owned ? ' owned' : '');
+  card.id        = 'biz-card-' + bizId;
+
+  const intervalSec = (biz.intervalMs / 1000).toFixed(0);
+  const rateLabel   = `${CURRENCY}${biz.minIncome}–${CURRENCY}${biz.maxIncome} / ${intervalSec}s`;
+
+  let footer = '';
+  if (owned) {
+    const wCount    = G.workers[bizId]     || 0;
+    const wLevel    = G.workerLevel[bizId] || 1;
+    const hireCost  = _workerHireCost(bizId);
+    const canHire   = wCount < biz.workerMax && G.capital >= hireCost;
+    const maxed     = wCount >= biz.workerMax;
+    const canUpgrade   = wLevel < 3 && G.capital >= biz.upgradeCosts[wLevel - 1];
+    const upgradeMaxed = wLevel >= 3;
+    const upgradeCost  = wLevel < 3 ? biz.upgradeCosts[wLevel - 1] : 0;
+
+    const workerMult = 1 + wCount * biz.workerBonus;
+    const levelMult  = [1, 1.5, 2][wLevel - 1];
+    const fleetMult  = isTransport ? FLEET_LEVEL_MULT[G.fleetLevel[bizId] || 1] : 1;
+    const effMin = Math.floor(biz.minIncome * workerMult * levelMult * fleetMult);
+    const effMax = Math.floor(biz.maxIncome * workerMult * levelMult * fleetMult);
+
+    // Fleet upgrade row (transport only)
+    let fleetRow = '';
+    if (isTransport) {
+      const fLevel    = G.fleetLevel[bizId] || 1;
+      const fMaxed    = fLevel >= 3;
+      const fCost     = !fMaxed ? biz.upgradeCosts[fLevel - 1] : 0;
+      const fCanAfford = !fMaxed && G.capital >= fCost;
+      fleetRow = `
+        <div class="worker-row">
+          <div class="worker-info">
+            <span class="worker-label">🚗 Fleet</span>
+            <span class="worker-level-badge lv${fLevel}">${FLEET_LEVEL_NAMES[fLevel]}</span>
           </div>
-        </div>
-        <div class="worker-section">
-          <div class="worker-row">
-            <div class="worker-info">
-              <span class="worker-label">👷 Workers</span>
-              <span class="worker-count">${wCount} / ${biz.workerMax}</span>
-            </div>
-            <button class="btn-worker ${canHire ? 'can-afford' : ''}"
-              onclick="hireWorker('${bizId}')"
-              ${canHire ? '' : 'disabled'}>
-              ${maxed ? 'MAXED' : 'HIRE ' + fmt(hireCost)}
-            </button>
-          </div>
-          <div class="worker-row">
-            <div class="worker-info">
-              <span class="worker-label">⭐ Staff Level</span>
-              <span class="worker-level-badge lv${wLevel}">${LEVEL_NAMES[wLevel]}</span>
-            </div>
-            <button class="btn-worker ${canUpgrade ? 'can-afford' : ''}"
-              onclick="upgradeWorkers('${bizId}')"
-              ${canUpgrade ? '' : 'disabled'}>
-              ${upgradeMaxed ? 'MAX LV' : 'UPGRADE ' + fmt(upgradeCost)}
-            </button>
-          </div>
-          <div class="worker-effective">
-            Effective: ${CURRENCY}${effMin.toLocaleString()}–${CURRENCY}${effMax.toLocaleString()} / ${intervalSec}s
-          </div>
+          <button class="btn-worker ${fCanAfford ? 'can-afford' : ''}"
+            onclick="upgradeFleet('${bizId}')"
+            ${fCanAfford ? '' : 'disabled'}>
+            ${fMaxed ? 'MAX LV' : 'UPGRADE ' + fmt(fCost)}
+          </button>
         </div>`;
-    } else {
-      footer = `
-        <button class="btn-buy ${canAfford ? 'can-afford' : ''}"
-          onclick="buyBusiness('${bizId}')"
-          ${canAfford ? '' : 'disabled'}>
-          ${canAfford ? '✓ BUY — ' + fmt(biz.cost) : 'NEED ' + fmt(biz.cost)}
-        </button>`;
     }
 
-    card.innerHTML = `
-      <div class="business-header">
-        <span class="business-emoji">${biz.emoji}</span>
-        <div class="business-info">
-          <div class="business-name">${biz.name}</div>
-          <div class="business-rate">${rateLabel}</div>
-          <div class="business-desc">${biz.description}</div>
+    // Driver label (transport = drivers, retail = workers)
+    const workerLabel = isTransport ? '🚴 Drivers' : '👷 Workers';
+
+    footer = `
+      <div class="biz-timer-wrap">
+        <div class="biz-timer-bar">
+          <div class="biz-timer-fill" id="biz-bar-${bizId}" style="width:0%"></div>
         </div>
-        ${owned ? '<span class="business-owned-badge">OWNED</span>' : ''}
       </div>
-      ${footer}
-    `;
-    grid.appendChild(card);
-  });
+      <div class="worker-section">
+        <div class="worker-row">
+          <div class="worker-info">
+            <span class="worker-label">${workerLabel}</span>
+            <span class="worker-count">${wCount} / ${biz.workerMax}</span>
+          </div>
+          <button class="btn-worker ${canHire ? 'can-afford' : ''}"
+            onclick="hireWorker('${bizId}')"
+            ${canHire ? '' : 'disabled'}>
+            ${maxed ? 'MAXED' : 'HIRE ' + fmt(hireCost)}
+          </button>
+        </div>
+        <div class="worker-row">
+          <div class="worker-info">
+            <span class="worker-label">⭐ Staff Level</span>
+            <span class="worker-level-badge lv${wLevel}">${LEVEL_NAMES[wLevel]}</span>
+          </div>
+          <button class="btn-worker ${canUpgrade ? 'can-afford' : ''}"
+            onclick="upgradeWorkers('${bizId}')"
+            ${canUpgrade ? '' : 'disabled'}>
+            ${upgradeMaxed ? 'MAX LV' : 'UPGRADE ' + fmt(upgradeCost)}
+          </button>
+        </div>
+        ${fleetRow}
+        <div class="worker-effective">
+          Effective: ${CURRENCY}${effMin.toLocaleString()}–${CURRENCY}${effMax.toLocaleString()} / ${intervalSec}s
+        </div>
+      </div>`;
+  } else {
+    footer = `
+      <button class="btn-buy ${canAfford ? 'can-afford' : ''}"
+        onclick="buyBusiness('${bizId}')"
+        ${canAfford ? '' : 'disabled'}>
+        ${canAfford ? '✓ BUY — ' + fmt(biz.cost) : 'NEED ' + fmt(biz.cost)}
+      </button>`;
+  }
+
+  // Vehicle type badge for transport
+  const vehicleBadge = isTransport && biz.vehicleType
+    ? `<span class="vehicle-badge">${biz.vehicleType.toUpperCase()}</span>`
+    : '';
+
+  card.innerHTML = `
+    <div class="business-header">
+      <span class="business-emoji">${biz.emoji}</span>
+      <div class="business-info">
+        <div class="business-name">${biz.name} ${vehicleBadge}</div>
+        <div class="business-rate">${rateLabel}</div>
+        <div class="business-desc">${biz.description}</div>
+      </div>
+      ${owned ? '<span class="business-owned-badge">OWNED</span>' : ''}
+    </div>
+    ${footer}
+  `;
+  container.appendChild(card);
 }
 
 // Progress bars
