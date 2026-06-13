@@ -1,6 +1,8 @@
 // ============================
-// RISE FROM NOTHING — UI  v1
+// RISE FROM NOTHING — UI  v2
 // ============================
+
+const LEVEL_NAMES = ['', 'Basic Staff', 'Trained Staff', 'Expert Staff'];
 
 // ── Master render ─────────────────────────────────────
 function renderAll() {
@@ -32,11 +34,10 @@ function renderJobSection() {
 function _renderJobTabs() {
   const wrap = document.getElementById('job-tabs');
   wrap.innerHTML = '';
-
   G.unlockedJobs.forEach(jobId => {
     const job = JOBS[jobId];
     const btn = document.createElement('button');
-    btn.className  = 'job-tab' + (jobId === G.activeJob ? ' active' : '');
+    btn.className   = 'job-tab' + (jobId === G.activeJob ? ' active' : '');
     btn.textContent = job.emoji + ' ' + job.name;
     btn.onclick     = () => switchJob(jobId);
     wrap.appendChild(btn);
@@ -46,10 +47,8 @@ function _renderJobTabs() {
 function _renderActions() {
   const grid = document.getElementById('actions-grid');
   grid.innerHTML = '';
-
   const job = JOBS[G.activeJob];
   if (!job) return;
-
   job.actions.forEach(action => {
     const btn = document.createElement('button');
     btn.className = 'action-btn';
@@ -65,9 +64,8 @@ function _renderActions() {
 
 // ── Unlock Section ────────────────────────────────────
 function renderUnlockSection() {
-  const list = document.getElementById('unlock-list');
+  const list   = document.getElementById('unlock-list');
   list.innerHTML = '';
-
   const locked = JOB_ORDER.filter(id => !G.unlockedJobs.includes(id));
 
   if (locked.length === 0) {
@@ -76,8 +74,8 @@ function renderUnlockSection() {
   }
 
   locked.forEach(jobId => {
-    const job      = JOBS[jobId];
-    const progress = Math.min(G.capital / job.unlockCost, 1);
+    const job       = JOBS[jobId];
+    const progress  = Math.min(G.capital / job.unlockCost, 1);
     const canAfford = G.capital >= job.unlockCost;
     const maxJob    = job.actions.reduce((a, b) => Math.max(a, b.maxIncome), 0);
 
@@ -96,11 +94,9 @@ function renderUnlockSection() {
           <div class="unlock-cost-label">${fmt(G.capital)} / ${fmt(job.unlockCost)}</div>
         </div>
       </div>
-      <button
-        class="btn-unlock"
-        onclick="unlockJob('${jobId}')"
-        ${canAfford ? '' : 'disabled'}
-      >${canAfford ? 'HIRE' : fmt(job.unlockCost)}</button>
+      <button class="btn-unlock" onclick="unlockJob('${jobId}')" ${canAfford ? '' : 'disabled'}>
+        ${canAfford ? 'HIRE' : fmt(job.unlockCost)}
+      </button>
     `;
     list.appendChild(card);
   });
@@ -112,8 +108,8 @@ function renderBusinessSection() {
   grid.innerHTML = '';
 
   BIZ_ORDER.forEach(bizId => {
-    const biz     = BUSINESSES[bizId];
-    const owned   = G.ownedBusinesses.includes(bizId);
+    const biz       = BUSINESSES[bizId];
+    const owned     = G.ownedBusinesses.includes(bizId);
     const canAfford = !owned && G.capital >= biz.cost;
 
     const card = document.createElement('div');
@@ -125,20 +121,61 @@ function renderBusinessSection() {
 
     let footer = '';
     if (owned) {
+      const wCount    = G.workers[bizId]     || 0;
+      const wLevel    = G.workerLevel[bizId] || 1;
+      const hireCost  = _workerHireCost(bizId);
+      const canHire   = wCount < biz.workerMax && G.capital >= hireCost;
+      const maxed     = wCount >= biz.workerMax;
+      const canUpgrade   = wLevel < 3 && G.capital >= biz.upgradeCosts[wLevel - 1];
+      const upgradeMaxed = wLevel >= 3;
+      const upgradeCost  = wLevel < 3 ? biz.upgradeCosts[wLevel - 1] : 0;
+
+      // effective income range with current workers/level
+      const workerMult = 1 + wCount * biz.workerBonus;
+      const levelMult  = [1, 1.5, 2][wLevel - 1];
+      const effMin = Math.floor(biz.minIncome * workerMult * levelMult);
+      const effMax = Math.floor(biz.maxIncome * workerMult * levelMult);
+
       footer = `
         <div class="biz-timer-wrap">
-          <div class="biz-timer-label">Next earnings</div>
           <div class="biz-timer-bar">
             <div class="biz-timer-fill" id="biz-bar-${bizId}" style="width:0%"></div>
+          </div>
+        </div>
+        <div class="worker-section">
+          <div class="worker-row">
+            <div class="worker-info">
+              <span class="worker-label">👷 Workers</span>
+              <span class="worker-count">${wCount} / ${biz.workerMax}</span>
+            </div>
+            <button class="btn-worker ${canHire ? 'can-afford' : ''}"
+              onclick="hireWorker('${bizId}')"
+              ${canHire ? '' : 'disabled'}>
+              ${maxed ? 'MAXED' : 'HIRE ' + fmt(hireCost)}
+            </button>
+          </div>
+          <div class="worker-row">
+            <div class="worker-info">
+              <span class="worker-label">⭐ Staff Level</span>
+              <span class="worker-level-badge lv${wLevel}">${LEVEL_NAMES[wLevel]}</span>
+            </div>
+            <button class="btn-worker ${canUpgrade ? 'can-afford' : ''}"
+              onclick="upgradeWorkers('${bizId}')"
+              ${canUpgrade ? '' : 'disabled'}>
+              ${upgradeMaxed ? 'MAX LV' : 'UPGRADE ' + fmt(upgradeCost)}
+            </button>
+          </div>
+          <div class="worker-effective">
+            Effective: ${CURRENCY}${effMin.toLocaleString()}–${CURRENCY}${effMax.toLocaleString()} / ${intervalSec}s
           </div>
         </div>`;
     } else {
       footer = `
-        <button
-          class="btn-buy ${canAfford ? 'can-afford' : ''}"
+        <button class="btn-buy ${canAfford ? 'can-afford' : ''}"
           onclick="buyBusiness('${bizId}')"
-          ${canAfford ? '' : 'disabled'}
-        >${canAfford ? '✓ BUY — ' + fmt(biz.cost) : 'NEED ' + fmt(biz.cost)}</button>`;
+          ${canAfford ? '' : 'disabled'}>
+          ${canAfford ? '✓ BUY — ' + fmt(biz.cost) : 'NEED ' + fmt(biz.cost)}
+        </button>`;
     }
 
     card.innerHTML = `
@@ -153,21 +190,18 @@ function renderBusinessSection() {
       </div>
       ${footer}
     `;
-
     grid.appendChild(card);
   });
 }
 
-// Progress bars — called every rAF frame
+// Progress bars
 function updateBizProgress() {
   G.ownedBusinesses.forEach(bizId => {
     const prog = G.bizProgress[bizId];
     const bar  = document.getElementById('biz-bar-' + bizId);
     if (!prog || !bar) return;
-
-    const elapsed  = Date.now() - prog.startMs;
-    const fill     = Math.min(elapsed / prog.intervalMs, 1) * 100;
-    bar.style.width = fill.toFixed(1) + '%';
+    const elapsed = Date.now() - prog.startMs;
+    bar.style.width = (Math.min(elapsed / prog.intervalMs, 1) * 100).toFixed(1) + '%';
   });
 }
 
@@ -178,9 +212,8 @@ function spawnFloat(text, anchorEl) {
   el.className    = 'float-text';
   el.textContent  = text;
 
-  // Position near the tapped element
   if (anchorEl) {
-    const rect = anchorEl.getBoundingClientRect();
+    const rect    = anchorEl.getBoundingClientRect();
     el.style.left = (rect.left + rect.width / 2 - 30) + 'px';
     el.style.top  = (rect.top - 10) + 'px';
   } else {
@@ -207,7 +240,7 @@ function closeOfflineModal() {
   document.getElementById('offline-modal').classList.add('hidden');
 }
 
-// ── Reset (debug) ─────────────────────────────────────
+// ── Reset ─────────────────────────────────────────────
 function resetGame() {
   if (!confirm('Wipe all progress and start over?')) return;
   Object.values(G.bizTimers).forEach(clearInterval);

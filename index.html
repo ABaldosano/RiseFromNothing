@@ -10,13 +10,20 @@
   <link rel="stylesheet" href="assets/css/global.css">
 </head>
 <body>
+
+  <!-- ── 3D World ── -->
+  <canvas id="world-canvas"></canvas>
+
   <div id="app">
 
-    <!-- ── Header ── -->
+    <!-- ── Header / HUD ── -->
     <header id="game-header">
       <div class="header-top">
         <span class="game-title">RISE FROM NOTHING</span>
-        <button class="header-reset" onclick="resetGame()">RESET</button>
+        <div class="header-buttons">
+          <button class="menu-toggle" onclick="togglePanel()">MENU</button>
+          <button class="header-reset" onclick="resetGame()">RESET</button>
+        </div>
       </div>
       <div class="capital-wrap">
         <div class="capital-label">CAPITAL</div>
@@ -37,39 +44,47 @@
     <!-- ── Floating text layer ── -->
     <div id="float-container"></div>
 
-    <!-- ── Main content ── -->
-    <main id="game-main">
+    <!-- ── World Controls ── -->
+    <div id="joystick-base"><div id="joystick-knob"></div></div>
+    <button id="run-btn">RUN</button>
+    <button id="interact-btn" class="hidden" onclick="interactWithBusiness()">INTERACT</button>
 
-      <!-- Job Section -->
-      <section class="game-section" id="job-section">
-        <div class="section-header">
-          <span class="section-icon">👤</span>
-          <h2 class="section-title">YOUR JOB</h2>
-          <span class="section-badge" id="current-job-name">Beggar</span>
-        </div>
-        <div class="job-tabs"   id="job-tabs"></div>
-        <div class="actions-grid" id="actions-grid"></div>
-      </section>
+    <!-- ── Panel Sheet (job / upgrades / businesses) ── -->
+    <div id="panel-sheet">
+      <div class="panel-handle" onclick="togglePanel()"></div>
+      <main id="game-main">
 
-      <!-- Career Upgrades -->
-      <section class="game-section" id="unlock-section">
-        <div class="section-header">
-          <span class="section-icon">🔓</span>
-          <h2 class="section-title">CAREER UPGRADES</h2>
-        </div>
-        <div class="unlock-list" id="unlock-list"></div>
-      </section>
+        <!-- Job Section -->
+        <section class="game-section" id="job-section">
+          <div class="section-header">
+            <span class="section-icon">👤</span>
+            <h2 class="section-title">YOUR JOB</h2>
+            <span class="section-badge" id="current-job-name">Beggar</span>
+          </div>
+          <div class="job-tabs"   id="job-tabs"></div>
+          <div class="actions-grid" id="actions-grid"></div>
+        </section>
 
-      <!-- Businesses -->
-      <section class="game-section" id="business-section">
-        <div class="section-header">
-          <span class="section-icon">🏢</span>
-          <h2 class="section-title">BUSINESSES</h2>
-        </div>
-        <div class="business-grid" id="business-grid"></div>
-      </section>
+        <!-- Career Upgrades -->
+        <section class="game-section" id="unlock-section">
+          <div class="section-header">
+            <span class="section-icon">🔓</span>
+            <h2 class="section-title">CAREER UPGRADES</h2>
+          </div>
+          <div class="unlock-list" id="unlock-list"></div>
+        </section>
 
-    </main>
+        <!-- Businesses -->
+        <section class="game-section" id="business-section">
+          <div class="section-header">
+            <span class="section-icon">🏢</span>
+            <h2 class="section-title">BUSINESSES</h2>
+          </div>
+          <div class="business-grid" id="business-grid"></div>
+        </section>
+
+      </main>
+    </div>
 
     <!-- ── Offline Modal ── -->
     <div id="offline-modal" class="modal hidden">
@@ -85,11 +100,13 @@
 
   </div>
 
-  <!-- Scripts: data → save → ui → game (init last) -->
+  <!-- Scripts: data → audio → save → ui → game (init last), world as module -->
   <script src="assets/js/data.js"></script>
+  <script src="assets/js/audio.js"></script>
   <script src="assets/js/save.js"></script>
   <script src="assets/js/ui.js"></script>
   <script src="assets/js/game.js"></script>
+  <script type="module" src="assets/js/world.js"></script>
   <script>
     // Boot
     window.addEventListener('DOMContentLoaded', initGame);

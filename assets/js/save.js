@@ -1,18 +1,20 @@
 // ============================
-// RISE FROM NOTHING — SAVE v1
+// RISE FROM NOTHING — SAVE v2
 // ============================
 
-const SAVE_KEY = 'rfn_save_v1';
+const SAVE_KEY = 'rfn_save_v1'; // keep key for compatibility
 
 function saveGame(state) {
   try {
     const payload = {
-      capital:           state.capital,
-      totalEarned:       state.totalEarned,
-      activeJob:         state.activeJob,
-      unlockedJobs:      state.unlockedJobs,
-      ownedBusinesses:   state.ownedBusinesses,
-      savedAt:           Date.now(),
+      capital:          state.capital,
+      totalEarned:      state.totalEarned,
+      activeJob:        state.activeJob,
+      unlockedJobs:     state.unlockedJobs,
+      ownedBusinesses:  state.ownedBusinesses,
+      workers:          state.workers,
+      workerLevel:      state.workerLevel,
+      savedAt:          Date.now(),
     };
     localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
   } catch (e) {
@@ -35,21 +37,21 @@ function deleteSave() {
   localStorage.removeItem(SAVE_KEY);
 }
 
-/**
- * Calculate earnings from owned businesses during time offline.
- * Uses average income per tick, capped at OFFLINE_CAP ms.
- */
-function calcOfflineEarnings(ownedBusinesses, savedAt) {
-  const now      = Date.now();
-  const elapsed  = Math.min(now - savedAt, OFFLINE_CAP);
-  let   total    = 0;
+function calcOfflineEarnings(ownedBusinesses, savedAt, workers, workerLevel) {
+  const now     = Date.now();
+  const elapsed = Math.min(now - savedAt, OFFLINE_CAP);
+  let   total   = 0;
 
   ownedBusinesses.forEach(bizId => {
     const biz = BUSINESSES[bizId];
     if (!biz) return;
-    const ticks   = Math.floor(elapsed / biz.intervalMs);
-    const avgTick = (biz.minIncome + biz.maxIncome) / 2;
-    total += ticks * avgTick;
+    const ticks       = Math.floor(elapsed / biz.intervalMs);
+    const avg         = (biz.minIncome + biz.maxIncome) / 2;
+    const wCount      = (workers      && workers[bizId])      || 0;
+    const wLevel      = (workerLevel  && workerLevel[bizId])  || 1;
+    const workerMult  = 1 + wCount * biz.workerBonus;
+    const levelMult   = [1, 1.5, 2][wLevel - 1];
+    total += ticks * avg * workerMult * levelMult;
   });
 
   return Math.floor(total);
