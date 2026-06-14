@@ -105,6 +105,8 @@ rise-from-nothing/
 │   ├── save.js         ← localStorage save/load + offline earnings
 │   ├── ui.js           ← DOM rendering & floating text
 │   └── game.js         ← Game state, logic, timers
+│   └── audio.js  
+│   └── world.js  
 └── README.md
 ```
 

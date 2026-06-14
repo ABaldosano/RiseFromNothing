@@ -1,12 +1,13 @@
 // ============================
 // RISE FROM NOTHING — WORLD v5
-// Entity Collisions | Smart Pathfinding | Day-Night Cycle | Pause
+// Entity Collisions | Smart Pathfinding | Day-Night Cycle | Pause | Pedestrians | Mouse Interact
 // ============================
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 
-const COLOR_PLAYER   = 0x448aff;
-const COLOR_WORKER   = 0xf0a500;
-const COLOR_CUSTOMER = 0x00e676;
+const COLOR_PLAYER      = 0x448aff;
+const COLOR_WORKER      = 0xf0a500;
+const COLOR_CUSTOMER    = 0x00e676;
+const COLOR_PEDESTRIAN  = 0xb0bec5;
 
 const BIZ_COLORS = {
   food_cart:          0xff7043,
@@ -42,6 +43,52 @@ const PLAYER_SPAWN     = { x: 0, z: 40 };
 const CUSTOMER_SPAWN   = { x: 14, z: -56 };
 const CUSTOMER_END     = { x: 14, z:  56 };
 
+// ── Beggar Targets ────────────────────────────────────────────
+const BEG_INTERACT_RADIUS = 2.4;
+const BEG_COOLDOWN        = 15;
+const BEG_GLOBAL_COOLDOWN = 0.6;
+const BEG_TARGET_COUNT    = 18;
+const BEG_MIN_SPACING     = 6;
+const BEG_ACTION_TYPES    = ['collect_bottles', 'collect_scrap']; // ask_change handled by walking NPCs
+
+// ── Street Sweeper Zones ──────────────────────────────────────
+const TRASH_COLLECT_RADIUS = 1.4;
+const SWEEP_BIN_RADIUS     = 5.4;
+
+const SWEEP_ZONES = {
+  sweep_block:  { center: { x: 0,  z: -25 }, radius: 8,  bin: { x: 0,  z: -35 } },
+  sweep_market: { center: { x: 45, z: 22 },  radius: 16, bin: { x: 45, z: 6  } },
+};
+
+// ── Pedestrian system ─────────────────────────────────────────
+const PEDESTRIAN_COUNT      = 40;
+const PEDESTRIAN_SPEED      = 1.6;
+const PEDESTRIAN_REPATH     = 8.0;
+const PEDESTRIAN_IDLE_TIME  = 2.5;
+
+// Pedestrian waypoint zones: sidewalks, park paths, park interior
+// These are world-space rectangular zones pedestrians pick goals from
+const PEDESTRIAN_ZONES = [
+  // West sidewalk (both sides)
+  { xMin: -12, xMax: -8,  zMin: -55, zMax:  55 },
+  { xMin:   8, xMax:  12, zMin: -55, zMax:  55 },
+  // North sidewalk
+  { xMin:   2, xMax:  88, zMin:  63, zMax:  67 },
+  // South sidewalk
+  { xMin:   2, xMax:  88, zMin: -67, zMax: -63 },
+  // East sidewalk
+  { xMin:  84, xMax:  88, zMin: -55, zMax:  55 },
+  // Park horizontal path
+  { xMin:  18, xMax:  72, zMin:  -2, zMax:   2 },
+  // Park vertical path
+  { xMin:  43, xMax:  47, zMin: -52, zMax:  52 },
+  // Park interior (green areas)
+  { xMin:  20, xMax:  43, zMin: -52, zMax:  -4 },
+  { xMin:  47, xMax:  70, zMin: -52, zMax:  -4 },
+  { xMin:  20, xMax:  43, zMin:   4, zMax:  52 },
+  { xMin:  47, xMax:  70, zMin:   4, zMax:  52 },
+];
+
 // ── Isometric Camera ───────────────────────────────────────────
 const ISO_YAW   = Math.PI / 4;
 const ISO_PITCH = 0.6154;
@@ -59,8 +106,11 @@ let _paused = false;
 function isPaused() { return _paused; }
 
 // ── Day-Night Cycle ───────────────────────────────────────────
-const DAY_NIGHT_CYCLE_MS = 20 * 60 * 1000; // 20 minutes total
-let _cycleTime = 0; // 0..1
+// Day = 11.5 min, Night = 8.5 min (3 min shorter), total = 20 min
+const DAY_NIGHT_CYCLE_MS = 20 * 60 * 1000;
+const _DAY_FRAC          = 11.5 / 20; // 0.575 — fraction of cycle that is day
+// _cycleTime = 0.2875 → noon (midpoint of day phase, _DAY_FRAC / 2)
+let _cycleTime = 0.2875;
 let _ambientLight   = null;
 let _sunLight       = null;
 let _moonLight      = null;
@@ -74,50 +124,50 @@ let _skyColors = {
 function _updateDayNight(dt) {
   if (_paused) return;
   _cycleTime = (_cycleTime + dt / (DAY_NIGHT_CYCLE_MS / 1000)) % 1;
-  const t = _cycleTime;
 
-  // t=0 sunrise, t=0.25 noon, t=0.5 sunset, t=0.75 midnight, t=1 sunrise
-  const sunAngle = t * Math.PI * 2;
-  const sunY     = Math.sin(sunAngle - Math.PI / 2); // -1 at midnight, +1 at noon
+  // Remap _cycleTime so day occupies _DAY_FRAC of the cycle:
+  //   [0, _DAY_FRAC)  → natural [0.25, 0.75]  (sun above horizon)
+  //   [_DAY_FRAC, 1)  → natural [0.75, 1.25]  (sun below horizon, wraps mod 1)
+  let naturalT;
+  if (_cycleTime < _DAY_FRAC) {
+    naturalT = 0.25 + (_cycleTime / _DAY_FRAC) * 0.5;
+  } else {
+    const nt = (_cycleTime - _DAY_FRAC) / (1 - _DAY_FRAC);
+    naturalT = (0.75 + nt * 0.5) % 1;
+  }
+
+  const sunAngle = naturalT * Math.PI * 2;
+  const sunY     = Math.sin(sunAngle - Math.PI / 2);
   const sunX     = Math.cos(sunAngle - Math.PI / 2);
 
-  // Day fraction: how "daytime" it is (0=night, 1=full day)
-  const dayFrac = Math.max(0, sunY);
-  // Transition zone 0..0.15 above horizon
+  const dayFrac  = Math.max(0, sunY);
   const dawnDusk = Math.max(0, Math.min(1, (sunY + 0.15) / 0.15));
 
-  // Ambient light
   const ambientDay   = 0.75;
   const ambientNight = 0.12;
   const ambientVal   = ambientNight + (ambientDay - ambientNight) * dayFrac;
   if (_ambientLight) _ambientLight.intensity = ambientVal;
 
-  // Sun directional
   if (_sunLight) {
     _sunLight.intensity = 0.8 * Math.max(0, sunY);
     _sunLight.position.set(sunX * 40, Math.max(0.1, sunY) * 30, 10);
-    // Warm sunrise/sunset tint
     const noon   = new THREE.Color(0xffffff);
     const golden = new THREE.Color(0xff9944);
     const sunColor = noon.clone().lerp(golden, Math.max(0, 1 - dayFrac * 4));
     _sunLight.color.copy(sunColor);
   }
 
-  // Moon light (opposite to sun)
   if (_moonLight) {
     const moonY = -sunY;
     _moonLight.intensity = 0.15 * Math.max(0, moonY);
     _moonLight.position.set(-sunX * 40, Math.max(0.1, moonY) * 30, -10);
   }
 
-  // Sky / fog color
   if (scene) {
     let skyColor;
     if (sunY > 0.15) {
-      // Full day
       skyColor = new THREE.Color(0x0d0f11).lerp(new THREE.Color(0x162030), dayFrac);
     } else if (sunY > -0.15) {
-      // Dawn/dusk transition
       const dawn = new THREE.Color(0x1a0a00);
       const night = new THREE.Color(0x020308);
       const dayColor = new THREE.Color(0x162030);
@@ -131,7 +181,6 @@ function _updateDayNight(dt) {
     scene.fog.color.copy(skyColor);
   }
 
-  // Street lights: on at night
   if (_streetLights) {
     const lightsOn = sunY < 0.1;
     const lampIntensity = lightsOn ? Math.max(0, 1 - dayFrac * 10) : 0;
@@ -143,7 +192,7 @@ function _updateDayNight(dt) {
 }
 
 // ── Collision system ───────────────────────────────────────────
-const _staticColliders = []; // {minX, maxX, minZ, maxZ}
+const _staticColliders = [];
 const PLAYER_RADIUS    = 0.42;
 const ENTITY_RADIUS    = 0.38;
 
@@ -171,8 +220,7 @@ function resolveStaticCollisions(pos, radius) {
   }
 }
 
-// Dynamic entity collision (workers, customers vs each other)
-const _dynamicEntities = []; // {pos, radius, id}
+const _dynamicEntities = [];
 
 function registerDynamic(entity) {
   if (!_dynamicEntities.find(e => e === entity)) _dynamicEntities.push(entity);
@@ -204,12 +252,12 @@ function resolveCollisions(pos, radius, selfId) {
 }
 
 // ── Pathfinding (grid-based A*) ───────────────────────────────
-const PF_CELL   = 2.0;  // world units per cell
+const PF_CELL   = 2.0;
 const PF_ORIGIN = { x: -10, z: -70 };
 const PF_COLS   = 60;
 const PF_ROWS   = 70;
 
-let _pfGrid = null; // 0=free, 1=blocked
+let _pfGrid = null;
 
 function _worldToCell(wx, wz) {
   return {
@@ -251,7 +299,6 @@ function _aStar(sx, sz, ex, ez) {
   ec.row = Math.max(0, Math.min(PF_ROWS - 1, ec.row));
 
   if (_pfGrid[_pfIdx(ec.col, ec.row)] === 1) {
-    // Try to find nearest free cell to target
     let found = false;
     for (let d = 1; d < 4 && !found; d++) {
       for (let dr = -d; dr <= d && !found; dr++) {
@@ -279,7 +326,7 @@ function _aStar(sx, sz, ex, ez) {
   f[startIdx] = Math.hypot(ec.col - sc.col, ec.row - sc.row);
   open.add(startIdx);
 
-  const DIRS = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
+  const DIRS  = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
   const COSTS = [1, 1, 1, 1, 1.414, 1.414, 1.414, 1.414];
 
   let iters = 0;
@@ -319,7 +366,6 @@ function _aStar(sx, sz, ex, ez) {
   return path.length > 1 ? path : [];
 }
 
-// Path smoothing: remove waypoints that can be skipped in straight line
 function _smoothPath(path, startX, startZ) {
   if (!path || path.length < 2) return path;
   const full = [{ x: startX, z: startZ }, ...path];
@@ -350,18 +396,71 @@ function _lineOfSight(x1, z1, x2, z2) {
   return true;
 }
 
+function _pickFreeTrashSpot(center, radius) {
+  for (let i = 0; i < 60; i++) {
+    const ang = Math.random() * Math.PI * 2;
+    const r   = 1.5 + Math.random() * (radius - 1.5);
+    const x   = center.x + Math.cos(ang) * r;
+    const z   = center.z + Math.sin(ang) * r;
+    const c   = _worldToCell(x, z);
+    if (c.col < 0 || c.col >= PF_COLS || c.row < 0 || c.row >= PF_ROWS) continue;
+    if (_pfGrid && _pfGrid[_pfIdx(c.col, c.row)] === 0) return { x, z };
+  }
+  return { x: center.x + (Math.random() - 0.5) * radius, z: center.z + (Math.random() - 0.5) * radius };
+}
+
+function _randomFreeSpot(xMin, xMax, zMin, zMax) {
+  for (let i = 0; i < 40; i++) {
+    const x = xMin + Math.random() * (xMax - xMin);
+    const z = zMin + Math.random() * (zMax - zMin);
+    const c = _worldToCell(x, z);
+    if (c.col < 0 || c.col >= PF_COLS || c.row < 0 || c.row >= PF_ROWS) continue;
+    if (_pfGrid && _pfGrid[_pfIdx(c.col, c.row)] === 0) return { x, z };
+  }
+  return null;
+}
+
+// Pick a random goal from pedestrian walkable zones
+function _randomPedestrianGoal() {
+  const zone = PEDESTRIAN_ZONES[Math.floor(Math.random() * PEDESTRIAN_ZONES.length)];
+  for (let i = 0; i < 20; i++) {
+    const x = zone.xMin + Math.random() * (zone.xMax - zone.xMin);
+    const z = zone.zMin + Math.random() * (zone.zMax - zone.zMin);
+    const c = _worldToCell(x, z);
+    if (c.col < 0 || c.col >= PF_COLS || c.row < 0 || c.row >= PF_ROWS) continue;
+    if (_pfGrid && _pfGrid[_pfIdx(c.col, c.row)] === 0) return { x, z };
+  }
+  // fallback: center of zone
+  return { x: (zone.xMin + zone.xMax) / 2, z: (zone.zMin + zone.zMax) / 2 };
+}
+
+// Pick a spawn point from pedestrian zones
+function _randomPedestrianSpawn() {
+  return _randomPedestrianGoal();
+}
+
 let scene, camera, renderer, clock, canvasEl;
 let player;
 let businessMeshes = {};
 let workerNPCs     = {};
 let vehicleNPCs    = {};
 let customerNPCs   = [];
+let pedestrianNPCs = [];
 let customerSpawnTimers = {};
 let gStateRef  = null;
 let onInteract = null;
 let lastInteract = null;
 let _entityCounter = 0;
 let _streetLights  = [];
+
+// ── Beggar / Street Sweeper state ─────────────────────────────
+let _begTargets   = {};
+let _begGlobalCooldown = 0;
+let _trashItems   = [];
+let _sweepBinMesh = null;
+let _sweepZone    = null;
+let _carryStack   = [];
+let _depositAnims = [];
 
 // ── Input ──────────────────────────────────────────────────────
 const inputState = { run: false };
@@ -471,6 +570,58 @@ function makeFountain(x, z) {
   g.add(base, basin, pillar, top);
   g.position.set(x, 0, z);
   addBoxCollider(x, z, 2.8, 2.8);
+  return g;
+}
+
+function makeBegTarget(actionId, x, z) {
+  let g;
+  if (actionId === 'ask_change') {
+    g = makeAvatar(0x9e9e9e);
+    g.scale.set(0.8, 0.8, 0.8);
+  } else if (actionId === 'collect_bottles') {
+    g = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color: 0x4caf50, transparent: true, opacity: 0.85 });
+    for (let i = 0; i < 3; i++) {
+      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.4, 6), mat);
+      b.position.set((i - 1) * 0.25, 0.2, (i % 2 === 0 ? 0.1 : -0.1));
+      g.add(b);
+    }
+  } else {
+    g = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color: 0x78909c });
+    for (let i = 0; i < 3; i++) {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.2, 0.35), mat);
+      b.position.set((i - 1) * 0.15, 0.1 + i * 0.16, (i % 2 === 0 ? 0.1 : -0.1));
+      b.rotation.y = i * 0.6;
+      g.add(b);
+    }
+  }
+  g.position.set(x, 0, z);
+  return g;
+}
+
+function makeTrashItem(x, z) {
+  // Vary trash appearance for visual diversity
+  const types = [0x8d6e63, 0x546e7a, 0x795548, 0x607d8b, 0x4e342e];
+  const color = types[Math.floor(Math.random() * types.length)];
+  const sizeX = 0.2 + Math.random() * 0.22;
+  const sizeY = 0.18 + Math.random() * 0.18;
+  const sizeZ = 0.2 + Math.random() * 0.22;
+  const m = new THREE.Mesh(new THREE.BoxGeometry(sizeX, sizeY, sizeZ),
+    new THREE.MeshStandardMaterial({ color }));
+  m.position.set(x, sizeY / 2, z);
+  m.rotation.y = Math.random() * Math.PI * 2;
+  m.rotation.z = (Math.random() - 0.5) * 0.4;
+  return m;
+}
+
+function makeSweepBin(x, z) {
+  const g    = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.2, 1.4),
+    new THREE.MeshStandardMaterial({ color: 0x00e676, emissive: 0x00e676, emissiveIntensity: 0.18 }));
+  body.position.y = 0.6;
+  g.add(body);
+  g.position.set(x, 0, z);
   return g;
 }
 
@@ -958,13 +1109,11 @@ class WorkerNPC extends Avatar {
     if (this._phase === 'to_task' || this._phase === 'returning') {
       const target = this._phase === 'to_task' ? this._task : this.home;
 
-      // Periodic repath
       if (this._repathTimer >= WORKER_REPATH_INTERVAL) {
         this._repathTimer = 0;
         this._requestPath(target.x, target.z);
       }
 
-      // Follow path
       if (this._path.length > 0 && this._wpIdx < this._path.length) {
         const wp   = this._path[this._wpIdx];
         const dx   = wp.x - p.x, dz = wp.z - p.z;
@@ -982,7 +1131,6 @@ class WorkerNPC extends Avatar {
           resolveDynamicCollisions(p, ENTITY_RADIUS, this._id);
         }
       } else {
-        // Reached destination
         const dx   = target.x - p.x, dz = target.z - p.z;
         const dist = Math.hypot(dx, dz);
         if (dist < 0.5) {
@@ -1004,7 +1152,6 @@ class WorkerNPC extends Avatar {
             });
           }
         } else {
-          // Direct move if path empty but not at destination
           p.x += dx / dist * 2.2 * dt;
           p.z += dz / dist * 2.2 * dt;
           this.facePoint(target.x, target.z);
@@ -1080,7 +1227,8 @@ class CustomerNPC extends Avatar {
     this.bizId   = bizId;
     this.phase   = 'arriving';
     this.timer   = 0;
-    this.dead    = false;
+    this.dead       = false;
+    this.begCooldown = 0;
     this._id     = 'c' + (++_entityCounter);
     this._dynRef = { pos: this.group.position, radius: ENTITY_RADIUS, id: this._id };
     registerDynamic(this._dynRef);
@@ -1107,6 +1255,220 @@ class CustomerNPC extends Avatar {
     }
     Footsteps.tick(this._id, this.state, dt);
     this.updateBob(dt);
+  }
+}
+
+// ── Pedestrian NPC ─────────────────────────────────────────────
+class PedestrianNPC extends Avatar {
+  constructor() {
+    const spawn = _randomPedestrianSpawn() || { x: 9.5, z: 0 };
+    // Vary pedestrian color slightly for visual diversity
+    const colors = [0xb0bec5, 0x90a4ae, 0xbdbdbd, 0xa1887f, 0x80cbc4, 0xce93d8];
+    super(colors[Math.floor(Math.random() * colors.length)], spawn);
+    this.group.scale.setScalar(0.82 + Math.random() * 0.18);
+    this._id         = 'ped' + (++_entityCounter);
+    this.begCooldown = 0;
+    this._goal       = _randomPedestrianGoal();
+    this._path       = [];
+    this._wpIdx      = 0;
+    this._idleTimer  = 0;
+    this._idle       = false;
+    this._repathTimer = 0;
+    this._speed      = PEDESTRIAN_SPEED * (0.8 + Math.random() * 0.4);
+    this._requestPath();
+    // Do NOT register in dynamic collisions — pedestrians are lightweight
+  }
+
+  _requestPath() {
+    const p = this.group.position;
+    const raw = _aStar(p.x, p.z, this._goal.x, this._goal.z);
+    this._path  = _smoothPath(raw, p.x, p.z) || [];
+    this._wpIdx = 0;
+    this._repathTimer = 0;
+  }
+
+  update(dt) {
+    if (_paused) return;
+
+    if (this._idle) {
+      this._idleTimer -= dt;
+      this.state = 'idle';
+      this.updateBob(dt);
+      if (this._idleTimer <= 0) {
+        this._idle = false;
+        this._goal = _randomPedestrianGoal();
+        this._requestPath();
+      }
+      return;
+    }
+
+    this._repathTimer += dt;
+    if (this._repathTimer >= PEDESTRIAN_REPATH) {
+      this._goal = _randomPedestrianGoal();
+      this._requestPath();
+    }
+
+    const p = this.group.position;
+
+    if (this._path.length > 0 && this._wpIdx < this._path.length) {
+      const wp   = this._path[this._wpIdx];
+      const dx   = wp.x - p.x, dz = wp.z - p.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 0.5) {
+        this._wpIdx++;
+      } else {
+        p.x += dx / dist * this._speed * dt;
+        p.z += dz / dist * this._speed * dt;
+        this.facePoint(wp.x, wp.z);
+        this.state = 'walk';
+        resolveStaticCollisions(p, ENTITY_RADIUS * 0.7);
+      }
+    } else {
+      // Reached goal — idle briefly, then pick new goal
+      const dx   = this._goal.x - p.x, dz = this._goal.z - p.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 1.2) {
+        this._idle      = true;
+        this._idleTimer = PEDESTRIAN_IDLE_TIME * (0.5 + Math.random());
+        this.state = 'idle';
+      } else {
+        // Path failed or exhausted — direct nudge, then repath
+        p.x += dx / dist * this._speed * dt;
+        p.z += dz / dist * this._speed * dt;
+        this.facePoint(this._goal.x, this._goal.z);
+        this.state = 'walk';
+        if (this._repathTimer > 1.0) {
+          this._goal = _randomPedestrianGoal();
+          this._requestPath();
+        }
+      }
+    }
+
+    this.updateBob(dt);
+  }
+}
+
+// ── Pedestrian pool spawn ─────────────────────────────────────
+function _spawnPedestrians() {
+  // Stagger spawn: build _pfGrid must be called first
+  const count = PEDESTRIAN_COUNT;
+  for (let i = 0; i < count; i++) {
+    // Small delay offset via staggered repath timers
+    const ped = new PedestrianNPC();
+    ped._repathTimer = Math.random() * PEDESTRIAN_REPATH;
+    pedestrianNPCs.push(ped);
+    scene.add(ped.group);
+  }
+}
+
+// ── Beggar Targets ─────────────────────────────────────────────
+function _buildBegTargets() {
+  let placed = 0, attempts = 0;
+  const maxAttempts = BEG_TARGET_COUNT * 30;
+  while (placed < BEG_TARGET_COUNT && attempts < maxAttempts) {
+    attempts++;
+    const spot = _randomFreeSpot(-8, LOOP_X + 8, -(LOOP_Z + 8), LOOP_Z + 8);
+    if (!spot) continue;
+
+    if (Math.hypot(spot.x - PLAYER_SPAWN.x, spot.z - PLAYER_SPAWN.z) < 4) continue;
+
+    let tooClose = false;
+    for (const id in _begTargets) {
+      const t = _begTargets[id];
+      if (Math.hypot(t.pos.x - spot.x, t.pos.z - spot.z) < BEG_MIN_SPACING) { tooClose = true; break; }
+    }
+    if (tooClose) continue;
+
+    const actionId = BEG_ACTION_TYPES[placed % BEG_ACTION_TYPES.length];
+    const mesh = makeBegTarget(actionId, spot.x, spot.z);
+    scene.add(mesh);
+    const id = 'beg' + placed;
+    _begTargets[id] = { mesh, pos: { x: spot.x, z: spot.z }, actionId, cooldown: 0 };
+    placed++;
+  }
+}
+
+
+function setBegTargetCooldown(targetId) {
+  const t = _begTargets[targetId];
+  if (!t) return;
+  t.cooldown = BEG_COOLDOWN;
+  t.mesh.visible = false;
+  _begGlobalCooldown = BEG_GLOBAL_COOLDOWN;
+}
+
+// ── Street Sweeper ─────────────────────────────────────────────
+function startSweepArea(actionId) {
+  clearSweepArea();
+  const zone = SWEEP_ZONES[actionId];
+  if (!zone) return;
+  _sweepZone = zone;
+
+  const job    = (typeof JOBS !== 'undefined') ? JOBS.street_sweeper : null;
+  const action = job?.actions.find(a => a.id === actionId);
+  const count  = action?.trashCount || 18;
+
+  for (let i = 0; i < count; i++) {
+    const spot = _pickFreeTrashSpot(zone.center, zone.radius);
+    const mesh = makeTrashItem(spot.x, spot.z);
+    scene.add(mesh);
+    _trashItems.push({ mesh, x: spot.x, z: spot.z });
+  }
+
+  _sweepBinMesh = makeSweepBin(zone.bin.x, zone.bin.z);
+  scene.add(_sweepBinMesh);
+}
+
+function clearSweepArea() {
+  _trashItems.forEach(t => scene.remove(t.mesh));
+  _trashItems = [];
+  if (_sweepBinMesh) { scene.remove(_sweepBinMesh); _sweepBinMesh = null; }
+  _depositAnims.forEach(a => scene.remove(a.mesh));
+  _depositAnims = [];
+  _carryStack.forEach(box => player.group.remove(box));
+  _carryStack = [];
+  _sweepZone = null;
+}
+
+function setCarryCount(count) {
+  while (_carryStack.length < count) {
+    const box = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3),
+      new THREE.MeshStandardMaterial({ color: 0x8d6e63 }));
+    const idx = _carryStack.length;
+    box.position.set(0, 1.05 + idx * 0.34, -0.42);
+    player.group.add(box);
+    _carryStack.push(box);
+  }
+  while (_carryStack.length > count) {
+    const box = _carryStack.pop();
+    player.group.remove(box);
+    if (_sweepZone) _animateDeposit(box);
+  }
+}
+
+function _animateDeposit(box) {
+  const rot = player.group.rotation.y;
+  const lp  = box.position;
+  const wx  = player.group.position.x + lp.x * Math.cos(rot) + lp.z * Math.sin(rot);
+  const wz  = player.group.position.z - lp.x * Math.sin(rot) + lp.z * Math.cos(rot);
+  const wy  = player.group.position.y + lp.y;
+  box.position.set(wx, wy, wz);
+  scene.add(box);
+  _depositAnims.push({
+    mesh: box, t: 0, duration: 0.35,
+    from: new THREE.Vector3(wx, wy, wz),
+    to:   new THREE.Vector3(_sweepZone.bin.x, 0.6, _sweepZone.bin.z),
+  });
+}
+
+function _updateDepositAnims(dt) {
+  for (let i = _depositAnims.length - 1; i >= 0; i--) {
+    const a = _depositAnims[i];
+    a.t += dt / a.duration;
+    if (a.t >= 1) { scene.remove(a.mesh); _depositAnims.splice(i, 1); continue; }
+    a.mesh.position.lerpVectors(a.from, a.to, a.t);
+    const s = 1 - a.t * 0.6;
+    a.mesh.scale.setScalar(s);
   }
 }
 
@@ -1172,20 +1534,85 @@ function setupInput() {
     const rect = canvasEl.getBoundingClientRect();
     return { x: ((clientX - rect.left) / rect.width) * 2 - 1, y: -((clientY - rect.top) / rect.height) * 2 + 1 };
   }
+
+  // Build raycaster mesh lists for beg targets and trash items
+  function _getBegMeshList() {
+    return Object.values(_begTargets)
+      .filter(t => t.mesh.visible && t.cooldown <= 0)
+      .map(t => ({ mesh: t.mesh, id: Object.keys(_begTargets).find(k => _begTargets[k] === t) }));
+  }
+
   function _tryInteract(clientX, clientY) {
     if (_paused) return;
     const ndc = _getNDC(clientX, clientY);
     _mouse.set(ndc.x, ndc.y);
     _raycaster.setFromCamera(_mouse, camera);
-    const meshes = Object.values(businessMeshes);
-    const hits   = _raycaster.intersectObjects(meshes, true);
-    if (!hits.length) return;
-    const bizId = _bizIdFromMesh(hits[0].object);
-    if (!bizId) return;
-    const pos  = BUSINESS_POS[bizId];
-    const dist = Math.hypot(pos.x - player.group.position.x, pos.z - player.group.position.z);
-    if (dist > INTERACT_RADIUS) return;
-    if (typeof window.openBizPanel === 'function') window.openBizPanel(bizId);
+
+    // ── 1. Business click ──
+    const bizMeshes = Object.values(businessMeshes);
+    const bizHits   = _raycaster.intersectObjects(bizMeshes, true);
+    if (bizHits.length) {
+      const bizId = _bizIdFromMesh(bizHits[0].object);
+      if (bizId) {
+        const pos  = BUSINESS_POS[bizId];
+        const dist = Math.hypot(pos.x - player.group.position.x, pos.z - player.group.position.z);
+        if (dist <= INTERACT_RADIUS) {
+          if (typeof window.openBizPanel === 'function') window.openBizPanel(bizId);
+        }
+        return;
+      }
+    }
+
+    // ── 2. Beg target click ──
+    if (gStateRef?.activeJob === 'beggar' && _begGlobalCooldown <= 0) {
+      const begMeshes = Object.values(_begTargets)
+        .filter(t => t.mesh.visible && t.cooldown <= 0)
+        .map(t => t.mesh);
+      if (begMeshes.length) {
+        const begHits = _raycaster.intersectObjects(begMeshes, true);
+        if (begHits.length) {
+          // Find which target was hit
+          for (const id in _begTargets) {
+            const t = _begTargets[id];
+            if (!t.mesh.visible || t.cooldown > 0) continue;
+            if (begHits[0].object === t.mesh || begHits[0].object.parent === t.mesh) {
+              const d = Math.hypot(t.pos.x - player.group.position.x, t.pos.z - player.group.position.z);
+              if (d <= BEG_INTERACT_RADIUS) {
+                if (typeof window.interactWithBusiness === 'function') {
+                  // Trigger beg interaction via existing handler
+                  const payload = { type: 'beg', actionId: t.actionId, targetId: id };
+                  if (onInteract) onInteract(payload);
+                  if (typeof window.handleBegInteract === 'function') window.handleBegInteract(t.actionId, id);
+                }
+              }
+              return;
+            }
+          }
+        }
+      }
+    }
+
+    // ── 3. Trash item click ──
+    if (_trashItems.length && gStateRef && gStateRef.activeJob === 'street_sweeper') {
+      if ((gStateRef.sweepCarry || 0) < (gStateRef.sweepCapacity || 5)) {
+        const trashMeshes = _trashItems.map(t => t.mesh);
+        const trashHits   = _raycaster.intersectObjects(trashMeshes, false);
+        if (trashHits.length) {
+          const hitMesh = trashHits[0].object;
+          const idx = _trashItems.findIndex(t => t.mesh === hitMesh);
+          if (idx !== -1) {
+            const t = _trashItems[idx];
+            const d = Math.hypot(t.x - player.group.position.x, t.z - player.group.position.z);
+            if (d <= TRASH_COLLECT_RADIUS) {
+              scene.remove(t.mesh);
+              _trashItems.splice(idx, 1);
+              if (typeof window.onTrashCollected === 'function') window.onTrashCollected();
+            }
+          }
+          return;
+        }
+      }
+    }
   }
 
   let _wasDrag = false, _downX = 0, _downY = 0;
@@ -1197,13 +1624,17 @@ function setupInput() {
       const t = e.changedTouches[0]; _tryInteract(t.clientX, t.clientY);
     }
   });
+
+  // ── Hover cursor for businesses, beg targets, trash ──
   canvasEl.addEventListener('mousemove', e => {
     const ndc = _getNDC(e.clientX, e.clientY);
     _mouse.set(ndc.x, ndc.y);
     _raycaster.setFromCamera(_mouse, camera);
-    const hits = _raycaster.intersectObjects(Object.values(businessMeshes), true);
-    if (hits.length) {
-      const bizId = _bizIdFromMesh(hits[0].object);
+
+    // Business hover
+    const bizHits = _raycaster.intersectObjects(Object.values(businessMeshes), true);
+    if (bizHits.length) {
+      const bizId = _bizIdFromMesh(bizHits[0].object);
       if (bizId) {
         const pos  = BUSINESS_POS[bizId];
         const dist = Math.hypot(pos.x - player.group.position.x, pos.z - player.group.position.z);
@@ -1211,6 +1642,42 @@ function setupInput() {
         return;
       }
     }
+
+    // Beg target hover
+    if (gStateRef?.activeJob === 'beggar' && _begGlobalCooldown <= 0) {
+      const activeBegMeshes = Object.values(_begTargets)
+        .filter(t => t.mesh.visible && t.cooldown <= 0)
+        .map(t => t.mesh);
+      if (activeBegMeshes.length) {
+        const begHits = _raycaster.intersectObjects(activeBegMeshes, true);
+        if (begHits.length) {
+          for (const id in _begTargets) {
+            const t = _begTargets[id];
+            if (!t.mesh.visible || t.cooldown > 0) continue;
+            if (begHits[0].object === t.mesh || begHits[0].object.parent === t.mesh) {
+              const d = Math.hypot(t.pos.x - player.group.position.x, t.pos.z - player.group.position.z);
+              canvasEl.style.cursor = d <= BEG_INTERACT_RADIUS ? 'pointer' : 'not-allowed';
+              return;
+            }
+          }
+        }
+      }
+    }
+
+    // Trash hover
+    if (_trashItems.length && gStateRef?.activeJob === 'street_sweeper') {
+      const trashHits = _raycaster.intersectObjects(_trashItems.map(t => t.mesh), false);
+      if (trashHits.length) {
+        const hitMesh = trashHits[0].object;
+        const t = _trashItems.find(ti => ti.mesh === hitMesh);
+        if (t) {
+          const d = Math.hypot(t.x - player.group.position.x, t.z - player.group.position.z);
+          canvasEl.style.cursor = d <= TRASH_COLLECT_RADIUS ? 'pointer' : 'not-allowed';
+          return;
+        }
+      }
+    }
+
     canvasEl.style.cursor = '';
   });
 
@@ -1243,6 +1710,9 @@ function onResize() {
   camera.updateProjectionMatrix();
 }
 
+// ── Pedestrian batch update — throttled to every 2nd frame ────
+let _pedFrameSkip = 0;
+
 // ── Main loop ──────────────────────────────────────────────────
 function loop() {
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -1268,6 +1738,13 @@ function loop() {
       if (c.dead) { scene.remove(c.group); return false; } return true;
     });
 
+    // Pedestrians: update every other frame for performance
+    _pedFrameSkip = (_pedFrameSkip + 1) % 2;
+    if (_pedFrameSkip === 0) {
+      const pedDt = dt * 2;
+      pedestrianNPCs.forEach(p => p.update(pedDt));
+    }
+
     if (gStateRef) {
       Object.keys(customerSpawnTimers).forEach(bizId => {
         if (!gStateRef.ownedBusinesses.includes(bizId)) return;
@@ -1284,13 +1761,72 @@ function loop() {
       });
     }
 
-    let nearest = null, nearestDist = 6;
-    Object.keys(BUSINESS_POS).forEach(bizId => {
-      const pos = BUSINESS_POS[bizId];
-      const d   = Math.hypot(pos.x - player.group.position.x, pos.z - player.group.position.z);
-      if (d < nearestDist) { nearestDist = d; nearest = bizId; }
-    });
-    if (nearest !== lastInteract) { lastInteract = nearest; if (onInteract) onInteract(nearest); }
+    // ── Beggar target cooldowns ──
+    if (_begGlobalCooldown > 0) _begGlobalCooldown -= dt;
+    for (const id in _begTargets) {
+      const t = _begTargets[id];
+      if (t.cooldown > 0) {
+        t.cooldown -= dt;
+        if (t.cooldown <= 0) { t.cooldown = 0; t.mesh.visible = true; }
+      }
+    }
+
+    // ── Trash collection (proximity auto) ──
+    if (_trashItems.length && gStateRef) {
+      for (let i = _trashItems.length - 1; i >= 0; i--) {
+        if ((gStateRef.sweepCarry || 0) >= (gStateRef.sweepCapacity || 5)) break;
+        const t = _trashItems[i];
+        const d = Math.hypot(t.x - player.group.position.x, t.z - player.group.position.z);
+        if (d <= TRASH_COLLECT_RADIUS) {
+          scene.remove(t.mesh);
+          _trashItems.splice(i, 1);
+          if (typeof window.onTrashCollected === 'function') window.onTrashCollected();
+        }
+      }
+    }
+
+    _updateDepositAnims(dt);
+
+    // ── Interactable detection (beg targets > sweep bin > businesses) ──
+    let interactPayload = null;
+    let interactKey     = null;
+
+    if (gStateRef?.activeJob === 'beggar' && _begGlobalCooldown <= 0) {
+      for (const id in _begTargets) {
+        const t = _begTargets[id];
+        if (t.cooldown > 0) continue;
+        const d = Math.hypot(t.pos.x - player.group.position.x, t.pos.z - player.group.position.z);
+        if (d <= BEG_INTERACT_RADIUS) {
+          interactPayload = { type: 'beg', actionId: t.actionId, targetId: id };
+          interactKey = 'beg:' + id;
+          break;
+        }
+      }
+    }
+
+    if (!interactPayload && _sweepZone && (gStateRef?.sweepCarry || 0) > 0) {
+      const bin = _sweepZone.bin;
+      const d = Math.hypot(bin.x - player.group.position.x, bin.z - player.group.position.z);
+      if (d <= SWEEP_BIN_RADIUS) {
+        interactPayload = { type: 'sweep_bin' };
+        interactKey = 'sweep_bin';
+      }
+    }
+
+    if (!interactPayload) {
+      let nearest = null, nearestDist = 6;
+      Object.keys(BUSINESS_POS).forEach(bizId => {
+        const pos = BUSINESS_POS[bizId];
+        const d   = Math.hypot(pos.x - player.group.position.x, pos.z - player.group.position.z);
+        if (d < nearestDist) { nearestDist = d; nearest = bizId; }
+      });
+      if (nearest) { interactPayload = { type: 'business', bizId: nearest }; interactKey = 'biz:' + nearest; }
+    }
+
+    if (interactKey !== lastInteract) {
+      lastInteract = interactKey;
+      if (onInteract) onInteract(interactPayload);
+    }
   }
 
   renderer.render(scene, camera);
@@ -1327,6 +1863,8 @@ function init(canvas, gState, businessesData, bizOrder) {
   scene.add(player.group);
 
   _buildGrid();
+  _buildBegTargets();
+  _spawnPedestrians();
 
   clock = new THREE.Clock();
   window.addEventListener('resize', onResize);
@@ -1380,4 +1918,7 @@ function setPaused(state) {
 
 function setInteractCallback(cb) { onInteract = cb; }
 
-window.WorldAPI = { init, updateWorld, setInteractCallback, setPaused, isPaused: () => _paused };
+window.WorldAPI = {
+  init, updateWorld, setInteractCallback, setPaused, isPaused: () => _paused,
+  setBegTargetCooldown, startSweepArea, clearSweepArea, setCarryCount,
+};

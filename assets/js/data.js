@@ -22,8 +22,8 @@ const JOBS = {
     description: 'Keeping the city clean, one block at a time.',
     unlockCost: 100,
     actions: [
-      { id: 'sweep_block',  name: 'Sweep a Block',    minIncome: 10, maxIncome: 18 },
-      { id: 'sweep_market', name: 'Sweep the Market', minIncome: 15, maxIncome: 25 },
+      { id: 'sweep_block',  name: 'Sweep a Block',    minIncome: 300, maxIncome: 300, trashCount: 300 },
+      { id: 'sweep_market', name: 'Sweep the Market', minIncome: 1000, maxIncome: 1000, trashCount: 1000 },
     ],
   },
   garbage_collector: {
@@ -31,8 +31,8 @@ const JOBS = {
     description: 'Early mornings, heavy loads, steady pay.',
     unlockCost: 1000,
     actions: [
-      { id: 'collect_route', name: 'Run a Route', minIncome: 50, maxIncome: 80  },
-      { id: 'collect_bulk',  name: 'Bulk Pickup', minIncome: 60, maxIncome: 100 },
+      { id: 'collect_route', name: 'Run a Route', minIncome: 300, maxIncome: 300  },
+      { id: 'collect_bulk',  name: 'Bulk Pickup', minIncome: 400, maxIncome: 400 },
     ],
   },
   courier: {

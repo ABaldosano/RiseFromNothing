@@ -17,6 +17,9 @@ const G = {
   fleetLevel:       {},
   activeRoutes:     {},
   paused:           false,
+  sweepTask:        null,
+  sweepCarry:       0,
+  sweepCapacity:    500,
 };
 
 // ── Pause System ──────────────────────────────────────────────
@@ -106,15 +109,23 @@ function initGame() {
 }
 
 // ── World UI hooks ────────────────────────────────────────────
-function _onInteractChange(bizId) {
+function _onInteractChange(payload) {
   const btn = document.getElementById('interact-btn');
   if (!btn) return;
-  if (bizId) {
+  delete btn.dataset.type;
+  delete btn.dataset.biz;
+  delete btn.dataset.action;
+  delete btn.dataset.target;
+  if (payload) {
     btn.classList.remove('hidden');
-    btn.dataset.biz = bizId;
+    btn.dataset.type = payload.type;
+    if (payload.type === 'business') btn.dataset.biz = payload.bizId;
+    if (payload.type === 'beg') {
+      btn.dataset.action = payload.actionId;
+      btn.dataset.target = payload.targetId;
+    }
   } else {
     btn.classList.add('hidden');
-    delete btn.dataset.biz;
   }
 }
 
@@ -126,6 +137,18 @@ function togglePanel() {
 
 function interactWithBusiness() {
   if (G.paused) return;
+  const btn  = document.getElementById('interact-btn');
+  const type = btn?.dataset.type;
+
+  if (type === 'beg') {
+    doBegAction(btn.dataset.action, btn.dataset.target);
+    return;
+  }
+  if (type === 'sweep_bin') {
+    depositSweepTrash();
+    return;
+  }
+
   const panel = document.getElementById('panel-sheet');
   playClick();
   if (panel.classList.contains('open')) {
@@ -172,6 +195,98 @@ function doAction(actionId) {
   renderStats();
   renderUnlockSection();
   renderBusinessSection();
+}
+
+// ── Beggar ────────────────────────────────────────────────────
+function doBegAction(actionId, targetId) {
+  if (G.paused || G.activeJob !== 'beggar') return;
+  const action = JOBS.beggar.actions.find(a => a.id === actionId);
+  if (!action) return;
+
+  const earned = _rand(action.minIncome, action.maxIncome);
+  _addCapital(earned);
+  playCoin();
+  spawnFloat('+' + fmt(earned), document.getElementById('interact-btn'));
+
+  window.WorldAPI?.setBegTargetCooldown(targetId);
+
+  saveGame(G);
+  renderStats();
+  renderUnlockSection();
+  renderBusinessSection();
+}
+
+// ── Street Sweeper ────────────────────────────────────────────
+function startSweepTask(actionId) {
+  if (G.paused || G.sweepTask || G.activeJob !== 'street_sweeper') return;
+  const action = JOBS.street_sweeper.actions.find(a => a.id === actionId);
+  if (!action) return;
+
+  G.sweepTask  = { type: actionId, total: action.trashCount, collected: 0, deposited: 0 };
+  G.sweepCarry = 0;
+
+  window.WorldAPI?.startSweepArea(actionId);
+  playClick();
+  saveGame(G);
+  renderJobSection();
+
+  const panel = document.getElementById('panel-sheet');
+  if (panel) panel.classList.remove('open');
+}
+
+function cancelSweepTask() {
+  if (!G.sweepTask) return;
+  G.sweepTask  = null;
+  G.sweepCarry = 0;
+  window.WorldAPI?.clearSweepArea();
+  saveGame(G);
+  renderJobSection();
+}
+
+function completeSweepTask() {
+  G.sweepTask  = null;
+  G.sweepCarry = 0;
+  window.WorldAPI?.clearSweepArea();
+  saveGame(G);
+  renderJobSection();
+}
+
+function depositSweepTrash() {
+  if (G.paused || !G.sweepTask || G.sweepCarry <= 0) return;
+
+  const earned = _sweepItemReward(G.sweepTask.type);
+  _addCapital(earned);
+  G.sweepCarry--;
+  G.sweepTask.deposited++;
+
+  playCoin();
+  spawnFloat('+' + fmt(earned), document.getElementById('interact-btn'));
+  window.WorldAPI?.setCarryCount(G.sweepCarry);
+
+  saveGame(G);
+  renderStats();
+  renderJobSection();
+
+  if (G.sweepTask.collected >= G.sweepTask.total && G.sweepCarry === 0) {
+    completeSweepTask();
+  }
+}
+
+function _sweepItemReward(actionId) {
+  const action = JOBS.street_sweeper.actions.find(a => a.id === actionId);
+  const n      = action.trashCount;
+  const perMin = Math.max(1, Math.floor(action.minIncome / n));
+  const perMax = Math.max(perMin, Math.ceil(action.maxIncome / n));
+  return _rand(perMin, perMax);
+}
+
+function onTrashCollected() {
+  if (!G.sweepTask) return;
+  G.sweepCarry++;
+  G.sweepTask.collected++;
+  window.WorldAPI?.setCarryCount(G.sweepCarry);
+  playClick();
+  renderJobSection();
 }
 
 // ── Jobs ──────────────────────────────────────────────────────

@@ -524,6 +524,53 @@ body::before {
   color: var(--green);
 }
 
+/* ── Beggar / Street Sweeper Task UI ── */
+.job-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  padding: 4px 10px 10px;
+}
+
+.action-info {
+  cursor: default;
+}
+
+.action-info:active {
+  transform: none;
+  background: var(--surface3);
+  border-color: var(--border2);
+}
+
+.action-task {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.task-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.task-status {
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.btn-unlock.task-cancel {
+  align-self: flex-start;
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.btn-unlock.task-cancel:active {
+  background: rgba(255,82,82,0.14);
+}
+
 /* ── Unlock Cards ── */
 .unlock-list {
   padding: 10px;

@@ -49,6 +49,16 @@ function _renderActions() {
   grid.innerHTML = '';
   const job = JOBS[G.activeJob];
   if (!job) return;
+
+  if (G.activeJob === 'beggar') {
+    _renderBeggarInfo(grid, job);
+    return;
+  }
+  if (G.activeJob === 'street_sweeper') {
+    _renderSweeperTasks(grid, job);
+    return;
+  }
+
   job.actions.forEach(action => {
     const btn = document.createElement('button');
     btn.className = 'action-btn';
@@ -58,6 +68,63 @@ function _renderActions() {
       <span class="action-income">${CURRENCY}${action.minIncome}–${CURRENCY}${action.maxIncome}</span>
     `;
     btn.onclick = () => doAction(action.id);
+    grid.appendChild(btn);
+  });
+}
+
+function _renderBeggarInfo(grid, job) {
+  const hint = document.createElement('div');
+  hint.className = 'job-hint';
+  hint.textContent = 'Walk up to people, bottle piles, or scrap piles around the city and press the interact button to earn.';
+  grid.appendChild(hint);
+
+  job.actions.forEach(action => {
+    const row = document.createElement('div');
+    row.className = 'action-btn action-info';
+    row.innerHTML = `
+      <span class="action-name">${action.name}</span>
+      <span class="action-income">${CURRENCY}${action.minIncome}–${CURRENCY}${action.maxIncome}</span>
+    `;
+    grid.appendChild(row);
+  });
+}
+
+function _renderSweeperTasks(grid, job) {
+  if (G.sweepTask) {
+    const action   = job.actions.find(a => a.id === G.sweepTask.type);
+    const progress = G.sweepTask.total > 0 ? (G.sweepTask.deposited / G.sweepTask.total) : 0;
+    const card = document.createElement('div');
+    card.className = 'action-btn action-task';
+    card.innerHTML = `
+      <div class="task-row">
+        <span class="action-name">${action.name}</span>
+        <span class="action-income">${CURRENCY}${action.minIncome}–${CURRENCY}${action.maxIncome}</span>
+      </div>
+      <div class="unlock-progress"><div class="unlock-progress-fill" style="width:${(progress * 100).toFixed(1)}%"></div></div>
+      <div class="task-status">Collected ${G.sweepTask.collected}/${G.sweepTask.total} · Carrying ${G.sweepCarry}/${G.sweepCapacity}</div>
+      <button class="btn-unlock task-cancel" onclick="cancelSweepTask()">CANCEL</button>
+    `;
+    grid.appendChild(card);
+    return;
+  }
+
+  const hint = document.createElement('div');
+  hint.className = 'job-hint';
+  hint.textContent = 'Accept a cleanup task, then collect trash and deposit it in the bin.';
+  grid.appendChild(hint);
+
+  job.actions.forEach(action => {
+    const btn = document.createElement('button');
+    btn.className = 'action-btn action-task';
+    btn.id        = 'action-' + action.id;
+    btn.innerHTML = `
+      <div class="task-row">
+        <span class="action-name">${action.name}</span>
+        <span class="action-income">${CURRENCY}${action.minIncome}–${CURRENCY}${action.maxIncome}</span>
+      </div>
+      <div class="task-status">${action.trashCount} items to collect</div>
+    `;
+    btn.onclick = () => startSweepTask(action.id);
     grid.appendChild(btn);
   });
 }
