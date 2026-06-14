@@ -42,6 +42,7 @@
           <span class="job-chip-dot"></span>
           <span id="current-job-name">Beggar</span>
         </div>
+        <button class="hud-btn hud-btn-pause" id="pause-btn" onclick="togglePause()">⏸</button>
         <button class="hud-btn" id="menu-btn" onclick="togglePanel()">☰</button>
         <button class="hud-btn hud-btn-danger" onclick="resetGame()">↺</button>
       </div>
@@ -53,7 +54,21 @@
     <button id="jump-btn">JUMP</button>
     <button id="interact-btn" class="hidden" onclick="interactWithBusiness()">!</button>
 
-    <!-- ── Panel Sheet ── -->
+    <!-- ── Pause Menu ── -->
+    <div id="pause-menu" class="modal hidden">
+      <div class="modal-overlay"></div>
+      <div class="modal-card pause-card">
+        <div class="modal-icon">⏸</div>
+        <h3 class="modal-title">PAUSED</h3>
+        <p class="modal-text">Game is paused. All timers and entities are frozen.</p>
+        <div class="pause-actions">
+          <button class="btn-primary" onclick="togglePause()">▶ RESUME</button>
+          <button class="btn-secondary" onclick="resetGame()">↺ RESTART</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Panel Sheet (Fullscreen) ── -->
     <div id="panel-sheet">
       <div class="panel-handle" onclick="togglePanel()"></div>
 
@@ -69,6 +84,8 @@
           <span class="ptab-icon">🏢</span><span class="ptab-label">BIZ</span>
         </button>
       </div>
+
+      <button class="panel-close-btn" onclick="togglePanel()">✕</button>
 
       <main id="game-main">
 
@@ -127,7 +144,6 @@
   <script>
     window.addEventListener('DOMContentLoaded', initGame);
 
-    // Panel tab switcher
     function switchPanelTab(tab, btn) {
       document.querySelectorAll('.panel-tab').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
@@ -143,12 +159,9 @@
 (() => {
   const lockLandscape = async () => {
     try {
-      if (screen.orientation?.lock) {
-        await screen.orientation.lock('landscape');
-      }
+      if (screen.orientation?.lock) await screen.orientation.lock('landscape');
     } catch (e) {}
   };
-
   document.addEventListener('click', lockLandscape, { once: true });
   document.addEventListener('touchstart', lockLandscape, { once: true });
 
@@ -158,22 +171,18 @@
     <div class="rotate-card">
       <div class="rotate-icon">📱</div>
       <div class="rotate-title">Rotate Device</div>
-      <div class="rotate-subtitle">
-        Enable auto-rotate and switch to landscape to play.
-      </div>
+      <div class="rotate-subtitle">Enable auto-rotate and switch to landscape to play.</div>
     </div>
   `;
   document.body.appendChild(rotateOverlay);
-
   const updateOrientation = () => {
     const portrait = window.innerHeight > window.innerWidth;
     rotateOverlay.style.display = portrait ? 'flex' : 'none';
   };
-
   window.addEventListener('resize', updateOrientation);
   window.addEventListener('orientationchange', updateOrientation);
   updateOrientation();
 })();
-</script>
+  </script>
 </body>
 </html>

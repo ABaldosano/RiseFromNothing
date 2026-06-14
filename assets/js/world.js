@@ -1,6 +1,6 @@
 // ============================
-// RISE FROM NOTHING — WORLD v4.5
-// Fixed Isometric Camera | Hard AABB Collisions | Square Road Loop
+// RISE FROM NOTHING — WORLD v5
+// Entity Collisions | Smart Pathfinding | Day-Night Cycle | Pause
 // ============================
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 
@@ -50,22 +50,111 @@ const ZOOM_MAX  = 45;
 let   cameraZoom = 22;
 
 // ── Map layout constants ───────────────────────────────────────
-const LOOP_Z  = 60;   // north/south road Z endpoints
-const LOOP_X  = 90;   // east road X center
+const LOOP_Z  = 60;
+const LOOP_X  = 90;
 
-// ── Collision system ───────────────────────────────────────────
-const _colliders    = [];  // {minX, maxX, minZ, maxZ}
-const PLAYER_RADIUS = 0.42;
+// ── Pause State ───────────────────────────────────────────────
+let _paused = false;
 
-function addBoxCollider(cx, cz, hw, hd) {
-  _colliders.push({ minX: cx - hw, maxX: cx + hw, minZ: cz - hd, maxZ: cz + hd });
+function isPaused() { return _paused; }
+
+// ── Day-Night Cycle ───────────────────────────────────────────
+const DAY_NIGHT_CYCLE_MS = 20 * 60 * 1000; // 20 minutes total
+let _cycleTime = 0; // 0..1
+let _ambientLight   = null;
+let _sunLight       = null;
+let _moonLight      = null;
+let _skyColors = {
+  day:     new THREE.Color(0x0d0f11),
+  sunrise: new THREE.Color(0x1a0a00),
+  sunset:  new THREE.Color(0x1a0500),
+  night:   new THREE.Color(0x020308),
+};
+
+function _updateDayNight(dt) {
+  if (_paused) return;
+  _cycleTime = (_cycleTime + dt / (DAY_NIGHT_CYCLE_MS / 1000)) % 1;
+  const t = _cycleTime;
+
+  // t=0 sunrise, t=0.25 noon, t=0.5 sunset, t=0.75 midnight, t=1 sunrise
+  const sunAngle = t * Math.PI * 2;
+  const sunY     = Math.sin(sunAngle - Math.PI / 2); // -1 at midnight, +1 at noon
+  const sunX     = Math.cos(sunAngle - Math.PI / 2);
+
+  // Day fraction: how "daytime" it is (0=night, 1=full day)
+  const dayFrac = Math.max(0, sunY);
+  // Transition zone 0..0.15 above horizon
+  const dawnDusk = Math.max(0, Math.min(1, (sunY + 0.15) / 0.15));
+
+  // Ambient light
+  const ambientDay   = 0.75;
+  const ambientNight = 0.12;
+  const ambientVal   = ambientNight + (ambientDay - ambientNight) * dayFrac;
+  if (_ambientLight) _ambientLight.intensity = ambientVal;
+
+  // Sun directional
+  if (_sunLight) {
+    _sunLight.intensity = 0.8 * Math.max(0, sunY);
+    _sunLight.position.set(sunX * 40, Math.max(0.1, sunY) * 30, 10);
+    // Warm sunrise/sunset tint
+    const noon   = new THREE.Color(0xffffff);
+    const golden = new THREE.Color(0xff9944);
+    const sunColor = noon.clone().lerp(golden, Math.max(0, 1 - dayFrac * 4));
+    _sunLight.color.copy(sunColor);
+  }
+
+  // Moon light (opposite to sun)
+  if (_moonLight) {
+    const moonY = -sunY;
+    _moonLight.intensity = 0.15 * Math.max(0, moonY);
+    _moonLight.position.set(-sunX * 40, Math.max(0.1, moonY) * 30, -10);
+  }
+
+  // Sky / fog color
+  if (scene) {
+    let skyColor;
+    if (sunY > 0.15) {
+      // Full day
+      skyColor = new THREE.Color(0x0d0f11).lerp(new THREE.Color(0x162030), dayFrac);
+    } else if (sunY > -0.15) {
+      // Dawn/dusk transition
+      const dawn = new THREE.Color(0x1a0a00);
+      const night = new THREE.Color(0x020308);
+      const dayColor = new THREE.Color(0x162030);
+      const p = (sunY + 0.15) / 0.30;
+      if (sunY > 0) skyColor = night.clone().lerp(dawn, 0.5).lerp(dayColor, p);
+      else skyColor = night.clone().lerp(dawn, 1 - p);
+    } else {
+      skyColor = new THREE.Color(0x020308);
+    }
+    scene.background.copy(skyColor);
+    scene.fog.color.copy(skyColor);
+  }
+
+  // Street lights: on at night
+  if (_streetLights) {
+    const lightsOn = sunY < 0.1;
+    const lampIntensity = lightsOn ? Math.max(0, 1 - dayFrac * 10) : 0;
+    _streetLights.forEach(m => {
+      if (m.material?.emissiveIntensity !== undefined)
+        m.material.emissiveIntensity = 0.1 + lampIntensity * 0.8;
+    });
+  }
 }
 
-function resolveCollisions(pos) {
-  const r = PLAYER_RADIUS;
-  // Two passes handles corner cases
+// ── Collision system ───────────────────────────────────────────
+const _staticColliders = []; // {minX, maxX, minZ, maxZ}
+const PLAYER_RADIUS    = 0.42;
+const ENTITY_RADIUS    = 0.38;
+
+function addBoxCollider(cx, cz, hw, hd) {
+  _staticColliders.push({ minX: cx - hw, maxX: cx + hw, minZ: cz - hd, maxZ: cz + hd });
+}
+
+function resolveStaticCollisions(pos, radius) {
+  const r = radius || PLAYER_RADIUS;
   for (let pass = 0; pass < 2; pass++) {
-    for (const box of _colliders) {
+    for (const box of _staticColliders) {
       if (pos.x + r > box.minX && pos.x - r < box.maxX &&
           pos.z + r > box.minZ && pos.z - r < box.maxZ) {
         const pushL = (pos.x + r) - box.minX;
@@ -82,6 +171,185 @@ function resolveCollisions(pos) {
   }
 }
 
+// Dynamic entity collision (workers, customers vs each other)
+const _dynamicEntities = []; // {pos, radius, id}
+
+function registerDynamic(entity) {
+  if (!_dynamicEntities.find(e => e === entity)) _dynamicEntities.push(entity);
+}
+function unregisterDynamic(entity) {
+  const i = _dynamicEntities.indexOf(entity);
+  if (i !== -1) _dynamicEntities.splice(i, 1);
+}
+
+function resolveDynamicCollisions(pos, radius, selfId) {
+  const r = radius || ENTITY_RADIUS;
+  for (const other of _dynamicEntities) {
+    if (other.id === selfId) continue;
+    const dx  = pos.x - other.pos.x;
+    const dz  = pos.z - other.pos.z;
+    const dist = Math.hypot(dx, dz);
+    const minD = r + (other.radius || ENTITY_RADIUS);
+    if (dist < minD && dist > 0.001) {
+      const push = (minD - dist) / 2;
+      pos.x += (dx / dist) * push;
+      pos.z += (dz / dist) * push;
+    }
+  }
+}
+
+function resolveCollisions(pos, radius, selfId) {
+  resolveStaticCollisions(pos, radius);
+  if (selfId !== undefined) resolveDynamicCollisions(pos, radius, selfId);
+}
+
+// ── Pathfinding (grid-based A*) ───────────────────────────────
+const PF_CELL   = 2.0;  // world units per cell
+const PF_ORIGIN = { x: -10, z: -70 };
+const PF_COLS   = 60;
+const PF_ROWS   = 70;
+
+let _pfGrid = null; // 0=free, 1=blocked
+
+function _worldToCell(wx, wz) {
+  return {
+    col: Math.floor((wx - PF_ORIGIN.x) / PF_CELL),
+    row: Math.floor((wz - PF_ORIGIN.z) / PF_CELL),
+  };
+}
+
+function _cellToWorld(col, row) {
+  return {
+    x: PF_ORIGIN.x + col * PF_CELL + PF_CELL / 2,
+    z: PF_ORIGIN.z + row * PF_CELL + PF_CELL / 2,
+  };
+}
+
+function _buildGrid() {
+  _pfGrid = new Uint8Array(PF_COLS * PF_ROWS);
+  for (const box of _staticColliders) {
+    const c0 = Math.max(0, Math.floor((box.minX - PF_ORIGIN.x) / PF_CELL) - 1);
+    const c1 = Math.min(PF_COLS - 1, Math.ceil((box.maxX - PF_ORIGIN.x) / PF_CELL) + 1);
+    const r0 = Math.max(0, Math.floor((box.minZ - PF_ORIGIN.z) / PF_CELL) - 1);
+    const r1 = Math.min(PF_ROWS - 1, Math.ceil((box.maxZ - PF_ORIGIN.z) / PF_CELL) + 1);
+    for (let r = r0; r <= r1; r++)
+      for (let c = c0; c <= c1; c++)
+        _pfGrid[r * PF_COLS + c] = 1;
+  }
+}
+
+function _pfIdx(col, row) { return row * PF_COLS + col; }
+
+function _aStar(sx, sz, ex, ez) {
+  if (!_pfGrid) return null;
+  const sc = _worldToCell(sx, sz);
+  const ec = _worldToCell(ex, ez);
+
+  sc.col = Math.max(0, Math.min(PF_COLS - 1, sc.col));
+  sc.row = Math.max(0, Math.min(PF_ROWS - 1, sc.row));
+  ec.col = Math.max(0, Math.min(PF_COLS - 1, ec.col));
+  ec.row = Math.max(0, Math.min(PF_ROWS - 1, ec.row));
+
+  if (_pfGrid[_pfIdx(ec.col, ec.row)] === 1) {
+    // Try to find nearest free cell to target
+    let found = false;
+    for (let d = 1; d < 4 && !found; d++) {
+      for (let dr = -d; dr <= d && !found; dr++) {
+        for (let dc = -d; dc <= d && !found; dc++) {
+          const nc = ec.col + dc, nr = ec.row + dr;
+          if (nc >= 0 && nc < PF_COLS && nr >= 0 && nr < PF_ROWS && _pfGrid[_pfIdx(nc, nr)] === 0) {
+            ec.col = nc; ec.row = nr; found = true;
+          }
+        }
+      }
+    }
+    if (!found) return null;
+  }
+
+  const startIdx = _pfIdx(sc.col, sc.row);
+  const endIdx   = _pfIdx(ec.col, ec.row);
+  if (startIdx === endIdx) return [];
+
+  const g = new Float32Array(PF_COLS * PF_ROWS).fill(Infinity);
+  const f = new Float32Array(PF_COLS * PF_ROWS).fill(Infinity);
+  const prev = new Int32Array(PF_COLS * PF_ROWS).fill(-1);
+  const open = new Set();
+
+  g[startIdx] = 0;
+  f[startIdx] = Math.hypot(ec.col - sc.col, ec.row - sc.row);
+  open.add(startIdx);
+
+  const DIRS = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
+  const COSTS = [1, 1, 1, 1, 1.414, 1.414, 1.414, 1.414];
+
+  let iters = 0;
+  while (open.size > 0 && iters++ < 4000) {
+    let cur = -1, bestF = Infinity;
+    for (const idx of open) { if (f[idx] < bestF) { bestF = f[idx]; cur = idx; } }
+    if (cur === endIdx) break;
+    open.delete(cur);
+
+    const curRow = Math.floor(cur / PF_COLS);
+    const curCol = cur % PF_COLS;
+
+    for (let d = 0; d < DIRS.length; d++) {
+      const nc = curCol + DIRS[d][0];
+      const nr = curRow + DIRS[d][1];
+      if (nc < 0 || nc >= PF_COLS || nr < 0 || nr >= PF_ROWS) continue;
+      const ni = _pfIdx(nc, nr);
+      if (_pfGrid[ni] === 1) continue;
+      const ng = g[cur] + COSTS[d];
+      if (ng < g[ni]) {
+        g[ni] = ng; prev[ni] = cur;
+        f[ni] = ng + Math.hypot(ec.col - nc, ec.row - nr);
+        open.add(ni);
+      }
+    }
+  }
+
+  if (prev[endIdx] === -1 && startIdx !== endIdx) return null;
+
+  const path = [];
+  let cur = endIdx;
+  while (cur !== -1) {
+    const r = Math.floor(cur / PF_COLS), c = cur % PF_COLS;
+    path.unshift(_cellToWorld(c, r));
+    cur = prev[cur];
+  }
+  return path.length > 1 ? path : [];
+}
+
+// Path smoothing: remove waypoints that can be skipped in straight line
+function _smoothPath(path, startX, startZ) {
+  if (!path || path.length < 2) return path;
+  const full = [{ x: startX, z: startZ }, ...path];
+  const smooth = [full[0]];
+  let i = 0;
+  while (i < full.length - 1) {
+    let j = full.length - 1;
+    while (j > i + 1) {
+      if (_lineOfSight(full[i].x, full[i].z, full[j].x, full[j].z)) break;
+      j--;
+    }
+    smooth.push(full[j]);
+    i = j;
+  }
+  return smooth.slice(1);
+}
+
+function _lineOfSight(x1, z1, x2, z2) {
+  const steps = Math.ceil(Math.hypot(x2 - x1, z2 - z1) / (PF_CELL * 0.5));
+  for (let i = 1; i <= steps; i++) {
+    const t  = i / steps;
+    const px = x1 + (x2 - x1) * t;
+    const pz = z1 + (z2 - z1) * t;
+    const c  = _worldToCell(px, pz);
+    if (c.col < 0 || c.col >= PF_COLS || c.row < 0 || c.row >= PF_ROWS) return false;
+    if (_pfGrid[_pfIdx(c.col, c.row)] === 1) return false;
+  }
+  return true;
+}
+
 let scene, camera, renderer, clock, canvasEl;
 let player;
 let businessMeshes = {};
@@ -93,6 +361,7 @@ let gStateRef  = null;
 let onInteract = null;
 let lastInteract = null;
 let _entityCounter = 0;
+let _streetLights  = [];
 
 // ── Input ──────────────────────────────────────────────────────
 const inputState = { run: false };
@@ -142,6 +411,7 @@ function makeStreetLight(x, z) {
   const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.3, 0.4),
     new THREE.MeshStandardMaterial({ color: 0xfff3b0, emissive: 0xfff3b0, emissiveIntensity: 0.6 }));
   lamp.position.y = 3.1;
+  _streetLights.push(lamp);
   g.add(pole, lamp);
   g.position.set(x, 0, z);
   addBoxCollider(x, z, 0.25, 0.25);
@@ -162,7 +432,6 @@ function makeBench(x, z, rotY) {
   g.add(seat, back, leg1, leg2);
   g.position.set(x, 0, z);
   g.rotation.y = rotY || 0;
-  // Bench collider (rotated approx — always use world-axis AABB)
   const hw = rotY && Math.abs(Math.sin(rotY)) > 0.5 ? 0.35 : 0.8;
   const hd = rotY && Math.abs(Math.sin(rotY)) > 0.5 ? 0.8  : 0.35;
   addBoxCollider(x, z, hw, hd);
@@ -185,7 +454,6 @@ function makeDumpster(x, z) {
   return m;
 }
 
-// ── Fountain (park center prop) ────────────────────────────────
 function makeFountain(x, z) {
   const g    = new THREE.Group();
   const base = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.8, 0.4, 12),
@@ -206,7 +474,6 @@ function makeFountain(x, z) {
   return g;
 }
 
-// ── Vehicle meshes ─────────────────────────────────────────────
 function makeVehicleMesh(vehicleType, color) {
   const g   = new THREE.Group();
   const mat = new THREE.MeshStandardMaterial({ color });
@@ -331,15 +598,13 @@ function makeBusinessMesh(bizId, x, z) {
   return g;
 }
 
-// ── West road environment (existing) ──────────────────────────
+// ── Road builders ──────────────────────────────────────────────
 function buildWestRoad() {
-  // Main road
   const road = new THREE.Mesh(new THREE.PlaneGeometry(12, 130),
     new THREE.MeshStandardMaterial({ color: 0x37474f }));
   road.rotation.x = -Math.PI/2; road.position.y = 0.01;
   scene.add(road);
 
-  // Sidewalks
   [-9.5, 9.5].forEach(x => {
     const sw = new THREE.Mesh(new THREE.PlaneGeometry(5, 130),
       new THREE.MeshStandardMaterial({ color: 0xb0bec5 }));
@@ -347,13 +612,11 @@ function buildWestRoad() {
     scene.add(sw);
   });
 
-  // Left transport lane
   const leftLane = new THREE.Mesh(new THREE.PlaneGeometry(8, 130),
     new THREE.MeshStandardMaterial({ color: 0x455a64 }));
   leftLane.rotation.x = -Math.PI/2; leftLane.position.set(-17, 0.015, 0);
   scene.add(leftLane);
 
-  // Trees, lights, props
   for (let z = -55; z <= 55; z += 15) {
     scene.add(makeTree(-24, z));
     scene.add(makeTree(20, z + 7));
@@ -367,23 +630,18 @@ function buildWestRoad() {
   scene.add(makeDumpster(12, 30));
 }
 
-// ── North connector road (z=+LOOP_Z, runs east) ───────────────
 function buildNorthRoad() {
-  const len = LOOP_X;
-  const cx  = LOOP_X / 2;
-
+  const len = LOOP_X, cx = LOOP_X / 2;
   const road = new THREE.Mesh(new THREE.PlaneGeometry(len, 12),
     new THREE.MeshStandardMaterial({ color: 0x37474f }));
   road.rotation.x = -Math.PI/2; road.position.set(cx, 0.01, LOOP_Z);
   scene.add(road);
-
   [-1, 1].forEach(s => {
     const sw = new THREE.Mesh(new THREE.PlaneGeometry(len, 5),
       new THREE.MeshStandardMaterial({ color: 0xb0bec5 }));
     sw.rotation.x = -Math.PI/2; sw.position.set(cx, 0.02, LOOP_Z + s * 8.5);
     scene.add(sw);
   });
-
   for (let x = 8; x <= LOOP_X - 8; x += 15) {
     scene.add(makeTree(x, LOOP_Z + 14));
     scene.add(makeStreetLight(x + 5, LOOP_Z + 8));
@@ -394,23 +652,18 @@ function buildNorthRoad() {
   scene.add(makeTrashBin(45, LOOP_Z + 8));
 }
 
-// ── South connector road (z=-LOOP_Z, runs east) ───────────────
 function buildSouthRoad() {
-  const len = LOOP_X;
-  const cx  = LOOP_X / 2;
-
+  const len = LOOP_X, cx = LOOP_X / 2;
   const road = new THREE.Mesh(new THREE.PlaneGeometry(len, 12),
     new THREE.MeshStandardMaterial({ color: 0x37474f }));
   road.rotation.x = -Math.PI/2; road.position.set(cx, 0.01, -LOOP_Z);
   scene.add(road);
-
   [-1, 1].forEach(s => {
     const sw = new THREE.Mesh(new THREE.PlaneGeometry(len, 5),
       new THREE.MeshStandardMaterial({ color: 0xb0bec5 }));
     sw.rotation.x = -Math.PI/2; sw.position.set(cx, 0.02, -LOOP_Z + s * 8.5);
     scene.add(sw);
   });
-
   for (let x = 8; x <= LOOP_X - 8; x += 15) {
     scene.add(makeTree(x, -(LOOP_Z + 14)));
     scene.add(makeStreetLight(x + 5, -(LOOP_Z + 8)));
@@ -422,28 +675,22 @@ function buildSouthRoad() {
   scene.add(makeDumpster(75, -(LOOP_Z + 9)));
 }
 
-// ── East road (x=LOOP_X, runs north-south) ────────────────────
 function buildEastRoad() {
   const len = LOOP_Z * 2;
-
   const road = new THREE.Mesh(new THREE.PlaneGeometry(12, len),
     new THREE.MeshStandardMaterial({ color: 0x37474f }));
   road.rotation.x = -Math.PI/2; road.position.set(LOOP_X, 0.01, 0);
   scene.add(road);
-
   [-1, 1].forEach(s => {
     const sw = new THREE.Mesh(new THREE.PlaneGeometry(5, len),
       new THREE.MeshStandardMaterial({ color: 0xb0bec5 }));
     sw.rotation.x = -Math.PI/2; sw.position.set(LOOP_X + s * 8.5, 0.02, 0);
     scene.add(sw);
   });
-
-  // Transport lane on the right (east) side
   const outerLane = new THREE.Mesh(new THREE.PlaneGeometry(8, len),
     new THREE.MeshStandardMaterial({ color: 0x455a64 }));
   outerLane.rotation.x = -Math.PI/2; outerLane.position.set(LOOP_X + 17, 0.015, 0);
   scene.add(outerLane);
-
   for (let z = -55; z <= 55; z += 15) {
     scene.add(makeTree(LOOP_X + 15, z));
     scene.add(makeTree(LOOP_X - 21, z + 7));
@@ -456,15 +703,11 @@ function buildEastRoad() {
   scene.add(makeDumpster(LOOP_X - 12, -20));
 }
 
-// ── Interior park ──────────────────────────────────────────────
 function buildPark() {
-  // Park ground tint
   const park = new THREE.Mesh(new THREE.PlaneGeometry(LOOP_X - 14, LOOP_Z * 2 - 14),
     new THREE.MeshStandardMaterial({ color: 0x388e3c }));
   park.rotation.x = -Math.PI/2; park.position.set(LOOP_X / 2, 0.005, 0);
   scene.add(park);
-
-  // Paths (cross pattern)
   const pathMat = new THREE.MeshStandardMaterial({ color: 0x8d9ea8 });
   const pathH = new THREE.Mesh(new THREE.PlaneGeometry(LOOP_X - 14, 4), pathMat);
   pathH.rotation.x = -Math.PI/2; pathH.position.set(LOOP_X / 2, 0.008, 0);
@@ -472,40 +715,28 @@ function buildPark() {
   const pathV = new THREE.Mesh(new THREE.PlaneGeometry(4, LOOP_Z * 2 - 14), pathMat);
   pathV.rotation.x = -Math.PI/2; pathV.position.set(LOOP_X / 2, 0.008, 0);
   scene.add(pathV);
-
-  // Fountain at center
   scene.add(makeFountain(LOOP_X / 2, 0));
-
-  // Park trees (no collision near paths)
   const parkTrees = [
     [20, -40],[20, 40],[70, -40],[70, 40],
     [20, -10],[20, 10],[70, -10],[70, 10],
     [45, -45],[45, 45],
   ];
   parkTrees.forEach(([x, z]) => scene.add(makeTree(x, z)));
-
-  // Benches around fountain
   scene.add(makeBench(LOOP_X / 2 + 5,  4, 0));
   scene.add(makeBench(LOOP_X / 2 - 5, -4, 0));
   scene.add(makeBench(LOOP_X / 2,      5, Math.PI/2));
 }
 
-// ── Corners (intersection boxes) ──────────────────────────────
 function buildCorners() {
   const cMat = new THREE.MeshStandardMaterial({ color: 0x455a64 });
-  const corners = [
-    [0, LOOP_Z], [LOOP_X, LOOP_Z], [LOOP_X, -LOOP_Z], [0, -LOOP_Z]
-  ];
-  corners.forEach(([x, z]) => {
+  [[0, LOOP_Z], [LOOP_X, LOOP_Z], [LOOP_X, -LOOP_Z], [0, -LOOP_Z]].forEach(([x, z]) => {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), cMat);
     m.rotation.x = -Math.PI/2; m.position.set(x, 0.012, z);
     scene.add(m);
   });
 }
 
-// ── Master environment builder ─────────────────────────────────
 function buildEnvironment() {
-  // Base ground (covers whole map + margin)
   const grass = new THREE.Mesh(new THREE.PlaneGeometry(300, 300),
     new THREE.MeshStandardMaterial({ color: 0x2e7d32 }));
   grass.rotation.x = -Math.PI/2;
@@ -519,17 +750,21 @@ function buildEnvironment() {
   buildPark();
   buildCorners();
 
-  // Collection point
   const cp = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 0.1, 12),
     new THREE.MeshStandardMaterial({ color: 0xf0a500 }));
   cp.position.set(COLLECTION_POINT.x, 0.05, COLLECTION_POINT.z);
   scene.add(cp);
 
-  // Lighting
-  scene.add(new THREE.AmbientLight(0xffffff, 0.75));
-  const sun = new THREE.DirectionalLight(0xffffff, 0.8);
-  sun.position.set(20, 30, 10);
-  scene.add(sun);
+  _ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
+  scene.add(_ambientLight);
+
+  _sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  _sunLight.position.set(20, 30, 10);
+  scene.add(_sunLight);
+
+  _moonLight = new THREE.DirectionalLight(0x8899cc, 0.0);
+  _moonLight.position.set(-20, 20, -10);
+  scene.add(_moonLight);
 }
 
 // ── Worker Animation Controller ────────────────────────────────
@@ -563,8 +798,6 @@ class AnimationController {
     this._timer    = 0;
     this._onDone   = null;
     this._carryBox = this._buildCarryBox();
-    this._mixer    = null;
-    this._clips    = null;
   }
   get state() { return this._state; }
   setState(newState, onDone) {
@@ -573,13 +806,9 @@ class AnimationController {
     this._timer  = WORKER_STATE_DURATIONS[newState] || 0;
     this._onDone = onDone || null;
     this._applyVisuals(newState);
-    this._applyGLB(newState);
-  }
-  setGLBMixer(mixer, clips) {
-    this._mixer = mixer; this._clips = clips; this._applyGLB(this._state);
   }
   update(dt) {
-    if (this._mixer) this._mixer.update(dt);
+    if (_paused) return;
     if (this._timer <= 0) return;
     this._timer -= dt;
     if (this._state === WorkerAnimStates.DROPOFF) {
@@ -615,12 +844,6 @@ class AnimationController {
     }
     this._carryBox.visible = state === WorkerAnimStates.CARRY || state === WorkerAnimStates.DROPOFF;
   }
-  _applyGLB(state) {
-    if (!this._mixer || !this._clips) return;
-    this._mixer.stopAllAction();
-    const clip = this._clips[state];
-    if (clip) this._mixer.clipAction(clip).play();
-  }
 }
 
 // ── Base Avatar ────────────────────────────────────────────────
@@ -652,9 +875,12 @@ class Player extends Avatar {
     this.vy       = 0;
     this.grounded = true;
     this._id      = 'player';
+    this._dynRef  = { pos: this.group.position, radius: PLAYER_RADIUS, id: this._id };
+    registerDynamic(this._dynRef);
   }
   jump() { if (this.grounded) { this.vy = 5; this.grounded = false; } }
   update(dt) {
+    if (_paused) return;
     let ix = (keys.l ? -1 : 0) + (keys.r ?  1 : 0) + joyVec.x;
     let iz = (keys.f ? -1 : 0) + (keys.b ?  1 : 0) + joyVec.z;
     const sin = Math.sin(ISO_YAW), cos = Math.cos(ISO_YAW);
@@ -672,12 +898,9 @@ class Player extends Avatar {
       this.state = 'idle';
     }
 
-    // World bounds (covers full square road loop + margin)
     this.group.position.x = Math.min(LOOP_X + 8, Math.max(-8, this.group.position.x));
     this.group.position.z = Math.min(LOOP_Z + 8, Math.max(-(LOOP_Z + 8), this.group.position.z));
-
-    // Hard collisions
-    resolveCollisions(this.group.position);
+    resolveCollisions(this.group.position, PLAYER_RADIUS, this._id);
 
     if (!this.grounded || this.vy !== 0) {
       this.vy    -= 14 * dt;
@@ -688,60 +911,117 @@ class Player extends Avatar {
     Footsteps.tick(this._id, this.state, dt);
     this.updateBob(dt);
   }
+  dispose() {
+    unregisterDynamic(this._dynRef);
+  }
 }
 
 // ── Worker NPC ─────────────────────────────────────────────────
+const WORKER_REPATH_INTERVAL = 3.0;
+
 class WorkerNPC extends Avatar {
   constructor(homePos) {
     const jitter = () => (Math.random() * 2 - 1);
     super(COLOR_WORKER, { x: homePos.x + jitter(), z: homePos.z + jitter() });
-    this.home   = homePos;
-    this._id    = ++_entityCounter;
-    this._anim  = new AnimationController(this.group);
-    this._task  = this._newTask();
-    this._phase = 'to_task';
+    this.home        = homePos;
+    this._id         = 'w' + (++_entityCounter);
+    this._anim       = new AnimationController(this.group);
+    this._task       = this._newTask();
+    this._phase      = 'to_task';
+    this._path       = [];
+    this._wpIdx      = 0;
+    this._repathTimer = 0;
     this._anim.setState(WorkerAnimStates.WALK);
+    this._dynRef = { pos: this.group.position, radius: ENTITY_RADIUS, id: this._id };
+    registerDynamic(this._dynRef);
+    this._requestPath(this._task.x, this._task.z);
   }
   _newTask() {
-    return { x: this.home.x + (Math.random() * 6 - 3), z: this.home.z + (Math.random() * 6 - 3) };
+    return {
+      x: this.home.x + (Math.random() * 6 - 3),
+      z: this.home.z + (Math.random() * 6 - 3),
+    };
+  }
+  _requestPath(tx, tz) {
+    const p = this.group.position;
+    const raw = _aStar(p.x, p.z, tx, tz);
+    this._path  = _smoothPath(raw, p.x, p.z) || [];
+    this._wpIdx = 0;
   }
   update(dt) {
+    if (_paused) return;
     this._anim.update(dt);
+    this._repathTimer += dt;
+
     const p = this.group.position;
-    if (this._phase === 'to_task') {
-      const dx = this._task.x - p.x, dz = this._task.z - p.z;
-      const dist = Math.hypot(dx, dz);
-      if (dist < 0.25) {
-        this._phase = 'at_task'; this.state = 'idle';
-        this._anim.setState(WorkerAnimStates.PICKUP, () => {
-          this._phase = 'returning'; this._anim.setState(WorkerAnimStates.CARRY);
-          if (typeof playTaskComplete === 'function') playTaskComplete();
-        });
-      } else {
-        const speed = 2.2;
-        p.x += dx / dist * speed * dt; p.z += dz / dist * speed * dt;
-        this.facePoint(this._task.x, this._task.z);
-        this.state = 'walk'; this._anim.setState(WorkerAnimStates.WALK);
+
+    if (this._phase === 'to_task' || this._phase === 'returning') {
+      const target = this._phase === 'to_task' ? this._task : this.home;
+
+      // Periodic repath
+      if (this._repathTimer >= WORKER_REPATH_INTERVAL) {
+        this._repathTimer = 0;
+        this._requestPath(target.x, target.z);
       }
-    } else if (this._phase === 'returning') {
-      const dx = this.home.x - p.x, dz = this.home.z - p.z;
-      const dist = Math.hypot(dx, dz);
-      if (dist < 0.25) {
-        this._phase = 'at_home'; this.state = 'idle';
-        this._anim.setState(WorkerAnimStates.DROPOFF, () => {
-          this._phase = 'to_task'; this._task = this._newTask();
+
+      // Follow path
+      if (this._path.length > 0 && this._wpIdx < this._path.length) {
+        const wp   = this._path[this._wpIdx];
+        const dx   = wp.x - p.x, dz = wp.z - p.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 0.4) {
+          this._wpIdx++;
+        } else {
+          const speed = 2.2;
+          p.x += dx / dist * speed * dt;
+          p.z += dz / dist * speed * dt;
+          this.facePoint(wp.x, wp.z);
+          this.state = 'walk';
           this._anim.setState(WorkerAnimStates.WALK);
-        });
+          resolveStaticCollisions(p, ENTITY_RADIUS);
+          resolveDynamicCollisions(p, ENTITY_RADIUS, this._id);
+        }
       } else {
-        const speed = 2.2;
-        p.x += dx / dist * speed * dt; p.z += dz / dist * speed * dt;
-        this.facePoint(this.home.x, this.home.z); this.state = 'walk';
+        // Reached destination
+        const dx   = target.x - p.x, dz = target.z - p.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 0.5) {
+          if (this._phase === 'to_task') {
+            this._phase = 'at_task'; this.state = 'idle';
+            this._anim.setState(WorkerAnimStates.PICKUP, () => {
+              this._phase = 'returning';
+              this._requestPath(this.home.x, this.home.z);
+              this._anim.setState(WorkerAnimStates.CARRY);
+              if (typeof playTaskComplete === 'function') playTaskComplete();
+            });
+          } else {
+            this._phase = 'at_home'; this.state = 'idle';
+            this._anim.setState(WorkerAnimStates.DROPOFF, () => {
+              this._phase = 'to_task';
+              this._task  = this._newTask();
+              this._requestPath(this._task.x, this._task.z);
+              this._anim.setState(WorkerAnimStates.WALK);
+            });
+          }
+        } else {
+          // Direct move if path empty but not at destination
+          p.x += dx / dist * 2.2 * dt;
+          p.z += dz / dist * 2.2 * dt;
+          this.facePoint(target.x, target.z);
+          this.state = 'walk';
+        }
       }
-    } else { this.state = 'idle'; }
-    Footsteps.tick('w' + this._id, this.state, dt);
+    } else {
+      this.state = 'idle';
+    }
+
+    Footsteps.tick(this._id, this.state, dt);
     this.updateBob(dt);
   }
-  dispose() { Footsteps.remove('w' + this._id); }
+  dispose() {
+    unregisterDynamic(this._dynRef);
+    Footsteps.remove(this._id);
+  }
 }
 
 // ── Vehicle NPC ────────────────────────────────────────────────
@@ -762,6 +1042,7 @@ class VehicleNPC {
     this.group.rotation.y = Math.PI / 2;
   }
   update(dt) {
+    if (_paused) return;
     const p = this.group.position;
     if (this._phase === 'loading') {
       this._timer -= dt;
@@ -800,9 +1081,12 @@ class CustomerNPC extends Avatar {
     this.phase   = 'arriving';
     this.timer   = 0;
     this.dead    = false;
-    this._id     = ++_entityCounter;
+    this._id     = 'c' + (++_entityCounter);
+    this._dynRef = { pos: this.group.position, radius: ENTITY_RADIUS, id: this._id };
+    registerDynamic(this._dynRef);
   }
   update(dt) {
+    if (_paused) return;
     const p = this.group.position;
     if (this.phase === 'arriving' || this.phase === 'leaving') {
       const target = this.phase === 'arriving' ? this.target : this.despawn;
@@ -811,15 +1095,17 @@ class CustomerNPC extends Avatar {
         if (this.phase === 'arriving') {
           this.phase = 'purchasing'; this.timer = 1; this.state = 'idle';
           if (typeof playPurchase === 'function') playPurchase();
-        } else { this.dead = true; Footsteps.remove('c' + this._id); }
+        } else { this.dead = true; unregisterDynamic(this._dynRef); Footsteps.remove(this._id); }
       } else {
         p.x += dx / dist * 3 * dt; p.z += dz / dist * 3 * dt;
         this.facePoint(target.x, target.z); this.state = 'walk';
+        resolveStaticCollisions(p, ENTITY_RADIUS);
+        resolveDynamicCollisions(p, ENTITY_RADIUS, this._id);
       }
     } else {
       this.timer -= dt; if (this.timer <= 0) this.phase = 'leaving'; this.state = 'idle';
     }
-    Footsteps.tick('c' + this._id, this.state, dt);
+    Footsteps.tick(this._id, this.state, dt);
     this.updateBob(dt);
   }
 }
@@ -831,7 +1117,8 @@ function setupInput() {
     if (KEY_MAP[k]) keys[KEY_MAP[k]] = true;
     if (k === 'shift') inputState.run = true;
     if (k === 'e' && typeof window.interactWithBusiness === 'function') window.interactWithBusiness();
-    if (k === ' ') { e.preventDefault(); if (player) player.jump(); }
+    if (k === ' ') { e.preventDefault(); if (player && !_paused) player.jump(); }
+    if (k === 'escape' || k === 'p') { if (typeof window.togglePause === 'function') window.togglePause(); }
   });
   window.addEventListener('keyup', e => {
     const k = e.key.toLowerCase();
@@ -870,31 +1157,23 @@ function setupInput() {
   }
 
   const jumpBtn = document.getElementById('jump-btn');
-  if (jumpBtn) jumpBtn.addEventListener('pointerdown', e => { e.preventDefault(); if (player) player.jump(); });
+  if (jumpBtn) jumpBtn.addEventListener('pointerdown', e => { e.preventDefault(); if (player && !_paused) player.jump(); });
 
-  // ── Point-and-click / tap to interact with businesses ──────────
   const _raycaster = new THREE.Raycaster();
   const _mouse     = new THREE.Vector2();
-  const INTERACT_RADIUS = 8; // player must be within this distance
+  const INTERACT_RADIUS = 8;
 
   function _bizIdFromMesh(obj) {
     let cur = obj;
-    while (cur) {
-      if (cur.userData?.bizId) return cur.userData.bizId;
-      cur = cur.parent;
-    }
+    while (cur) { if (cur.userData?.bizId) return cur.userData.bizId; cur = cur.parent; }
     return null;
   }
-
   function _getNDC(clientX, clientY) {
     const rect = canvasEl.getBoundingClientRect();
-    return {
-      x:  ((clientX - rect.left) / rect.width)  * 2 - 1,
-      y: -((clientY - rect.top)  / rect.height) * 2 + 1,
-    };
+    return { x: ((clientX - rect.left) / rect.width) * 2 - 1, y: -((clientY - rect.top) / rect.height) * 2 + 1 };
   }
-
   function _tryInteract(clientX, clientY) {
+    if (_paused) return;
     const ndc = _getNDC(clientX, clientY);
     _mouse.set(ndc.x, ndc.y);
     _raycaster.setFromCamera(_mouse, camera);
@@ -905,27 +1184,19 @@ function setupInput() {
     if (!bizId) return;
     const pos  = BUSINESS_POS[bizId];
     const dist = Math.hypot(pos.x - player.group.position.x, pos.z - player.group.position.z);
-    if (dist > INTERACT_RADIUS) return; // too far
-    // Open panel scrolled to this business
+    if (dist > INTERACT_RADIUS) return;
     if (typeof window.openBizPanel === 'function') window.openBizPanel(bizId);
   }
 
-  // Desktop click
-  canvasEl.addEventListener('click', e => {
-    // Only handle if NOT a drag (moved < 5px)
-    if (_wasDrag) return;
-    _tryInteract(e.clientX, e.clientY);
-  });
-
-  // Mobile tap (single touch, no pinch)
+  let _wasDrag = false, _downX = 0, _downY = 0;
+  canvasEl.addEventListener('pointerdown', e => { _wasDrag = false; _downX = e.clientX; _downY = e.clientY; });
+  canvasEl.addEventListener('pointermove', e => { if (Math.hypot(e.clientX - _downX, e.clientY - _downY) > 5) _wasDrag = true; });
+  canvasEl.addEventListener('click', e => { if (!_wasDrag) _tryInteract(e.clientX, e.clientY); });
   canvasEl.addEventListener('touchend', e => {
     if (e.changedTouches.length === 1 && !_wasDrag) {
-      const t = e.changedTouches[0];
-      _tryInteract(t.clientX, t.clientY);
+      const t = e.changedTouches[0]; _tryInteract(t.clientX, t.clientY);
     }
   });
-
-  // Hover cursor on desktop
   canvasEl.addEventListener('mousemove', e => {
     const ndc = _getNDC(e.clientX, e.clientY);
     _mouse.set(ndc.x, ndc.y);
@@ -943,20 +1214,11 @@ function setupInput() {
     canvasEl.style.cursor = '';
   });
 
-  // Track drag to distinguish click vs pan
-  let _wasDrag = false, _downX = 0, _downY = 0;
-  canvasEl.addEventListener('pointerdown', e => { _wasDrag = false; _downX = e.clientX; _downY = e.clientY; });
-  canvasEl.addEventListener('pointermove', e => {
-    if (Math.hypot(e.clientX - _downX, e.clientY - _downY) > 5) _wasDrag = true;
-  });
-
-  // Scroll zoom
   canvasEl.addEventListener('wheel', e => {
     e.preventDefault();
     cameraZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, cameraZoom + e.deltaY * 0.04));
   }, { passive: false });
 
-  // Pinch zoom
   let _pinchDist = null;
   canvasEl.style.touchAction = 'none';
   canvasEl.addEventListener('touchstart', e => {
@@ -985,7 +1247,11 @@ function onResize() {
 function loop() {
   const dt = Math.min(clock.getDelta(), 0.05);
 
-  player.update(dt);
+  _updateDayNight(dt);
+
+  if (!_paused) {
+    player.update(dt);
+  }
 
   const cx = player.group.position.x + cameraZoom * Math.sin(ISO_YAW)   * Math.cos(ISO_PITCH);
   const cz = player.group.position.z + cameraZoom * Math.cos(ISO_YAW)   * Math.cos(ISO_PITCH);
@@ -993,37 +1259,39 @@ function loop() {
   camera.position.set(cx, cy, cz);
   camera.lookAt(player.group.position.x, player.group.position.y + 1, player.group.position.z);
 
-  Object.values(workerNPCs).forEach(list => list.forEach(w => w.update(dt)));
-  Object.values(vehicleNPCs).forEach(list => list.forEach(v => v.update(dt)));
+  if (!_paused) {
+    Object.values(workerNPCs).forEach(list => list.forEach(w => w.update(dt)));
+    Object.values(vehicleNPCs).forEach(list => list.forEach(v => v.update(dt)));
 
-  customerNPCs.forEach(c => c.update(dt));
-  customerNPCs = customerNPCs.filter(c => {
-    if (c.dead) { scene.remove(c.group); return false; } return true;
-  });
-
-  if (gStateRef) {
-    Object.keys(customerSpawnTimers).forEach(bizId => {
-      if (!gStateRef.ownedBusinesses.includes(bizId)) return;
-      if (typeof BUSINESSES !== 'undefined' && BUSINESSES[bizId]?.category !== 'retail') return;
-      customerSpawnTimers[bizId] -= dt;
-      if (customerSpawnTimers[bizId] <= 0) {
-        if (customerNPCs.filter(c => c.bizId === bizId).length < 2) {
-          const pos = BUSINESS_POS[bizId];
-          const c = new CustomerNPC({ x: pos.x, z: CUSTOMER_SPAWN.z }, pos, { x: pos.x, z: CUSTOMER_END.z }, bizId);
-          customerNPCs.push(c); scene.add(c.group);
-        }
-        customerSpawnTimers[bizId] = 4 + Math.random() * 5;
-      }
+    customerNPCs.forEach(c => c.update(dt));
+    customerNPCs = customerNPCs.filter(c => {
+      if (c.dead) { scene.remove(c.group); return false; } return true;
     });
-  }
 
-  let nearest = null, nearestDist = 6;
-  Object.keys(BUSINESS_POS).forEach(bizId => {
-    const pos = BUSINESS_POS[bizId];
-    const d   = Math.hypot(pos.x - player.group.position.x, pos.z - player.group.position.z);
-    if (d < nearestDist) { nearestDist = d; nearest = bizId; }
-  });
-  if (nearest !== lastInteract) { lastInteract = nearest; if (onInteract) onInteract(nearest); }
+    if (gStateRef) {
+      Object.keys(customerSpawnTimers).forEach(bizId => {
+        if (!gStateRef.ownedBusinesses.includes(bizId)) return;
+        if (typeof BUSINESSES !== 'undefined' && BUSINESSES[bizId]?.category !== 'retail') return;
+        customerSpawnTimers[bizId] -= dt;
+        if (customerSpawnTimers[bizId] <= 0) {
+          if (customerNPCs.filter(c => c.bizId === bizId).length < 2) {
+            const pos = BUSINESS_POS[bizId];
+            const c = new CustomerNPC({ x: pos.x, z: CUSTOMER_SPAWN.z }, pos, { x: pos.x, z: CUSTOMER_END.z }, bizId);
+            customerNPCs.push(c); scene.add(c.group);
+          }
+          customerSpawnTimers[bizId] = 4 + Math.random() * 5;
+        }
+      });
+    }
+
+    let nearest = null, nearestDist = 6;
+    Object.keys(BUSINESS_POS).forEach(bizId => {
+      const pos = BUSINESS_POS[bizId];
+      const d   = Math.hypot(pos.x - player.group.position.x, pos.z - player.group.position.z);
+      if (d < nearestDist) { nearestDist = d; nearest = bizId; }
+    });
+    if (nearest !== lastInteract) { lastInteract = nearest; if (onInteract) onInteract(nearest); }
+  }
 
   renderer.render(scene, camera);
   requestAnimationFrame(loop);
@@ -1058,6 +1326,8 @@ function init(canvas, gState, businessesData, bizOrder) {
   player = new Player(PLAYER_SPAWN);
   scene.add(player.group);
 
+  _buildGrid();
+
   clock = new THREE.Clock();
   window.addEventListener('resize', onResize);
   setupInput();
@@ -1068,7 +1338,7 @@ function init(canvas, gState, businessesData, bizOrder) {
 function updateWorld(gState, businessesData) {
   gStateRef = gState;
   Object.keys(businessMeshes).forEach(bizId => {
-    const grp  = businessMeshes[bizId];
+    const grp   = businessMeshes[bizId];
     const owned = gState.ownedBusinesses.includes(bizId);
     const mesh  = grp.userData.mainMesh;
     if (mesh?.material) {
@@ -1100,6 +1370,14 @@ function updateWorld(gState, businessesData) {
   });
 }
 
+function setPaused(state) {
+  _paused = state;
+  if (clock) {
+    if (_paused) clock.stop();
+    else clock.start();
+  }
+}
+
 function setInteractCallback(cb) { onInteract = cb; }
 
-window.WorldAPI = { init, updateWorld, setInteractCallback };
+window.WorldAPI = { init, updateWorld, setInteractCallback, setPaused, isPaused: () => _paused };

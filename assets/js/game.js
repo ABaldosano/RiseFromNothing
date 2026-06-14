@@ -1,5 +1,5 @@
 // ============================
-// RISE FROM NOTHING — GAME v4
+// RISE FROM NOTHING — GAME v5
 // ============================
 
 const G = {
@@ -8,18 +8,68 @@ const G = {
   activeJob:        'beggar',
   unlockedJobs:     ['beggar'],
   ownedBusinesses:  [],
-  workers:          {},   // bizId -> count
-  workerLevel:      {},   // bizId -> 1|2|3
+  workers:          {},
+  workerLevel:      {},
   bizTimers:        {},
   bizProgress:      {},
   offlineEarned:    0,
   rafId:            null,
-  // v4 transport state
-  fleetLevel:       {},   // bizId -> 1|2|3  (vehicle tier)
-  activeRoutes:     {},   // bizId -> routeIndex (cycling through waypoints)
+  fleetLevel:       {},
+  activeRoutes:     {},
+  paused:           false,
 };
 
-// ── Init ──────────────────────────────────────────────
+// ── Pause System ──────────────────────────────────────────────
+function pauseGame() {
+  if (G.paused) return;
+  G.paused = true;
+  // Pause all biz timers
+  Object.keys(G.bizTimers).forEach(bizId => {
+    clearInterval(G.bizTimers[bizId]);
+    G.bizTimers[bizId] = null;
+    // Record time remaining
+    if (G.bizProgress[bizId]) {
+      G.bizProgress[bizId].pausedAt = Date.now();
+    }
+  });
+  if (window.WorldAPI?.setPaused) window.WorldAPI.setPaused(true);
+  showPauseMenu();
+}
+
+function resumeGame() {
+  if (!G.paused) return;
+  G.paused = false;
+  // Resume biz timers accounting for pause offset
+  G.ownedBusinesses.forEach(bizId => {
+    const prog = G.bizProgress[bizId];
+    if (prog?.pausedAt) {
+      const pausedElapsed = Date.now() - prog.pausedAt;
+      prog.startMs += pausedElapsed;
+      delete prog.pausedAt;
+    }
+    _startBizTimer(bizId);
+  });
+  if (window.WorldAPI?.setPaused) window.WorldAPI.setPaused(false);
+  hidePauseMenu();
+}
+
+function togglePause() {
+  if (G.paused) resumeGame();
+  else pauseGame();
+}
+
+window.togglePause = togglePause;
+
+function showPauseMenu() {
+  const el = document.getElementById('pause-menu');
+  if (el) el.classList.remove('hidden');
+}
+function hidePauseMenu() {
+  const el = document.getElementById('pause-menu');
+  if (el) el.classList.add('hidden');
+}
+
+// ── Init ──────────────────────────────────────────────────────
 function initGame() {
   const saved = loadGame();
 
@@ -43,7 +93,7 @@ function initGame() {
   }
 
   G.ownedBusinesses.forEach(bizId => _startBizTimer(bizId));
-  setInterval(() => saveGame(G), 30_000);
+  setInterval(() => { if (!G.paused) saveGame(G); }, 30_000);
   G.rafId = requestAnimationFrame(_tick);
   renderAll();
   if (G.offlineEarned > 0) showOfflineModal(G.offlineEarned);
@@ -55,7 +105,7 @@ function initGame() {
   }
 }
 
-// ── World UI hooks ────────────────────────────────────
+// ── World UI hooks ────────────────────────────────────────────
 function _onInteractChange(bizId) {
   const btn = document.getElementById('interact-btn');
   if (!btn) return;
@@ -69,11 +119,13 @@ function _onInteractChange(bizId) {
 }
 
 function togglePanel() {
+  if (G.paused) return;
   document.getElementById('panel-sheet').classList.toggle('open');
   playClick();
 }
 
 function interactWithBusiness() {
+  if (G.paused) return;
   const panel = document.getElementById('panel-sheet');
   playClick();
   if (panel.classList.contains('open')) {
@@ -83,12 +135,11 @@ function interactWithBusiness() {
   panel.classList.add('open');
 }
 
-// Called by world.js raycaster when player clicks/taps a nearby business
 window.openBizPanel = function(bizId) {
+  if (G.paused) return;
   const panel = document.getElementById('panel-sheet');
   playClick();
   panel.classList.add('open');
-  // Switch to BIZ tab
   const bizTabBtn = document.querySelector('.panel-tab[onclick*="business"]');
   if (bizTabBtn && typeof switchPanelTab === 'function') switchPanelTab('business', bizTabBtn);
   setTimeout(() => {
@@ -97,14 +148,15 @@ window.openBizPanel = function(bizId) {
   }, 60);
 };
 
-// ── rAF tick ──────────────────────────────────────────
+// ── rAF tick ──────────────────────────────────────────────────
 function _tick() {
-  updateBizProgress();
+  if (!G.paused) updateBizProgress();
   G.rafId = requestAnimationFrame(_tick);
 }
 
-// ── Actions ───────────────────────────────────────────
+// ── Actions ───────────────────────────────────────────────────
 function doAction(actionId) {
+  if (G.paused) return;
   const job    = JOBS[G.activeJob];
   const action = job?.actions.find(a => a.id === actionId);
   if (!action) return;
@@ -122,7 +174,7 @@ function doAction(actionId) {
   renderBusinessSection();
 }
 
-// ── Jobs ──────────────────────────────────────────────
+// ── Jobs ──────────────────────────────────────────────────────
 function switchJob(jobId) {
   if (!G.unlockedJobs.includes(jobId)) return;
   G.activeJob = jobId;
@@ -142,7 +194,7 @@ function unlockJob(jobId) {
   renderAll();
 }
 
-// ── Businesses ────────────────────────────────────────
+// ── Businesses ────────────────────────────────────────────────
 function buyBusiness(bizId) {
   const biz = BUSINESSES[bizId];
   if (!biz || G.ownedBusinesses.includes(bizId) || G.capital < biz.cost) return;
@@ -162,7 +214,7 @@ function buyBusiness(bizId) {
   window.WorldAPI?.updateWorld(G, BUSINESSES);
 }
 
-// ── Workers ───────────────────────────────────────────
+// ── Workers ───────────────────────────────────────────────────
 function hireWorker(bizId) {
   const biz     = BUSINESSES[bizId];
   const current = G.workers[bizId] || 0;
@@ -202,8 +254,7 @@ function _workerHireCost(bizId) {
   return Math.floor(biz.workerCost * Math.pow(1.5, current));
 }
 
-// ── Fleet Upgrade (v4 transport) ──────────────────────
-// Fleet level boosts income multiplier: lv1 1x, lv2 1.6x, lv3 2.5x
+// ── Fleet Upgrade ─────────────────────────────────────────────
 const FLEET_LEVEL_NAMES   = ['', 'Standard', 'Upgraded', 'Premium'];
 const FLEET_LEVEL_MULT    = [1, 1, 1.6, 2.5];
 
@@ -225,14 +276,16 @@ function upgradeFleet(bizId) {
   window.WorldAPI?.updateWorld(G, BUSINESSES);
 }
 
-// ── Business timer ────────────────────────────────────
+// ── Business timer ────────────────────────────────────────────
 function _startBizTimer(bizId) {
   const biz = BUSINESSES[bizId];
   if (!biz) return;
+  if (G.bizTimers[bizId]) clearInterval(G.bizTimers[bizId]);
 
   G.bizProgress[bizId] = { startMs: Date.now(), intervalMs: biz.intervalMs };
 
   G.bizTimers[bizId] = setInterval(() => {
+    if (G.paused) return;
     const earned = _calcBizIncome(bizId);
     _addCapital(earned);
     G.bizProgress[bizId].startMs = Date.now();
@@ -253,14 +306,13 @@ function _calcBizIncome(bizId) {
   const wLevel     = G.workerLevel[bizId] || 1;
   const workerMult = 1 + wCount * biz.workerBonus;
   const levelMult  = [1, 1.5, 2][wLevel - 1];
-  // v4: fleet multiplier for transport businesses
   const fleetMult  = biz.category === 'transport'
     ? FLEET_LEVEL_MULT[G.fleetLevel[bizId] || 1]
     : 1;
   return Math.floor(base * workerMult * levelMult * fleetMult);
 }
 
-// ── Helpers ───────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────
 function _addCapital(amount) {
   G.capital     += amount;
   G.totalEarned += amount;
