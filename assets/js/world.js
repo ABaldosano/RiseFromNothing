@@ -872,6 +872,84 @@ function setupInput() {
   const jumpBtn = document.getElementById('jump-btn');
   if (jumpBtn) jumpBtn.addEventListener('pointerdown', e => { e.preventDefault(); if (player) player.jump(); });
 
+  // ── Point-and-click / tap to interact with businesses ──────────
+  const _raycaster = new THREE.Raycaster();
+  const _mouse     = new THREE.Vector2();
+  const INTERACT_RADIUS = 8; // player must be within this distance
+
+  function _bizIdFromMesh(obj) {
+    let cur = obj;
+    while (cur) {
+      if (cur.userData?.bizId) return cur.userData.bizId;
+      cur = cur.parent;
+    }
+    return null;
+  }
+
+  function _getNDC(clientX, clientY) {
+    const rect = canvasEl.getBoundingClientRect();
+    return {
+      x:  ((clientX - rect.left) / rect.width)  * 2 - 1,
+      y: -((clientY - rect.top)  / rect.height) * 2 + 1,
+    };
+  }
+
+  function _tryInteract(clientX, clientY) {
+    const ndc = _getNDC(clientX, clientY);
+    _mouse.set(ndc.x, ndc.y);
+    _raycaster.setFromCamera(_mouse, camera);
+    const meshes = Object.values(businessMeshes);
+    const hits   = _raycaster.intersectObjects(meshes, true);
+    if (!hits.length) return;
+    const bizId = _bizIdFromMesh(hits[0].object);
+    if (!bizId) return;
+    const pos  = BUSINESS_POS[bizId];
+    const dist = Math.hypot(pos.x - player.group.position.x, pos.z - player.group.position.z);
+    if (dist > INTERACT_RADIUS) return; // too far
+    // Open panel scrolled to this business
+    if (typeof window.openBizPanel === 'function') window.openBizPanel(bizId);
+  }
+
+  // Desktop click
+  canvasEl.addEventListener('click', e => {
+    // Only handle if NOT a drag (moved < 5px)
+    if (_wasDrag) return;
+    _tryInteract(e.clientX, e.clientY);
+  });
+
+  // Mobile tap (single touch, no pinch)
+  canvasEl.addEventListener('touchend', e => {
+    if (e.changedTouches.length === 1 && !_wasDrag) {
+      const t = e.changedTouches[0];
+      _tryInteract(t.clientX, t.clientY);
+    }
+  });
+
+  // Hover cursor on desktop
+  canvasEl.addEventListener('mousemove', e => {
+    const ndc = _getNDC(e.clientX, e.clientY);
+    _mouse.set(ndc.x, ndc.y);
+    _raycaster.setFromCamera(_mouse, camera);
+    const hits = _raycaster.intersectObjects(Object.values(businessMeshes), true);
+    if (hits.length) {
+      const bizId = _bizIdFromMesh(hits[0].object);
+      if (bizId) {
+        const pos  = BUSINESS_POS[bizId];
+        const dist = Math.hypot(pos.x - player.group.position.x, pos.z - player.group.position.z);
+        canvasEl.style.cursor = dist <= INTERACT_RADIUS ? 'pointer' : 'not-allowed';
+        return;
+      }
+    }
+    canvasEl.style.cursor = '';
+  });
+
+  // Track drag to distinguish click vs pan
+  let _wasDrag = false, _downX = 0, _downY = 0;
+  canvasEl.addEventListener('pointerdown', e => { _wasDrag = false; _downX = e.clientX; _downY = e.clientY; });
+  canvasEl.addEventListener('pointermove', e => {
+    if (Math.hypot(e.clientX - _downX, e.clientY - _downY) > 5) _wasDrag = true;
+  });
+
   // Scroll zoom
   canvasEl.addEventListener('wheel', e => {
     e.preventDefault();

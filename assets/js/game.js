@@ -81,15 +81,21 @@ function interactWithBusiness() {
     return;
   }
   panel.classList.add('open');
-  const btn = document.getElementById('interact-btn');
-  const bizId = btn?.dataset.biz;
-  if (bizId) {
-    setTimeout(() => {
-      const card = document.getElementById('biz-card-' + bizId);
-      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 50);
-  }
 }
+
+// Called by world.js raycaster when player clicks/taps a nearby business
+window.openBizPanel = function(bizId) {
+  const panel = document.getElementById('panel-sheet');
+  playClick();
+  panel.classList.add('open');
+  // Switch to BIZ tab
+  const bizTabBtn = document.querySelector('.panel-tab[onclick*="business"]');
+  if (bizTabBtn && typeof switchPanelTab === 'function') switchPanelTab('business', bizTabBtn);
+  setTimeout(() => {
+    const card = document.getElementById('biz-card-' + bizId);
+    if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 60);
+};
 
 // ── rAF tick ──────────────────────────────────────────
 function _tick() {

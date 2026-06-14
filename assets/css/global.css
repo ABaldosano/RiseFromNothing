@@ -231,6 +231,16 @@ body::before {
    ═══════════════════════════════════════ */
 
 /* Joystick — left thumb zone */
+/* Hide mobile controls on desktop (mouse/hover devices) */
+@media (hover: hover) and (pointer: fine) {
+  #joystick-base,
+  #joystick-knob,
+  #run-btn,
+  #jump-btn {
+    display: none !important;
+  }
+}
+
 #joystick-base {
   position: absolute;
   left: 18px;
