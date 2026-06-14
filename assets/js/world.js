@@ -61,7 +61,7 @@ const SWEEP_ZONES = {
 };
 
 // ── Pedestrian system ─────────────────────────────────────────
-const PEDESTRIAN_COUNT      = 40;
+const PEDESTRIAN_COUNT      = 50;
 const PEDESTRIAN_SPEED      = 1.6;
 const PEDESTRIAN_REPATH     = 8.0;
 const PEDESTRIAN_IDLE_TIME  = 2.5;
