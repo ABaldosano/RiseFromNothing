@@ -53,7 +53,7 @@ const BEG_ACTION_TYPES    = ['collect_bottles', 'collect_scrap']; // ask_change 
 
 // ── Street Sweeper Zones ──────────────────────────────────────
 const TRASH_COLLECT_RADIUS = 1.4;
-const SWEEP_BIN_RADIUS     = 5.4;
+const SWEEP_BIN_RADIUS     = 2.4;
 
 const SWEEP_ZONES = {
   sweep_block:  { center: { x: 0,  z: -25 }, radius: 8,  bin: { x: 0,  z: -35 } },
@@ -61,7 +61,7 @@ const SWEEP_ZONES = {
 };
 
 // ── Pedestrian system ─────────────────────────────────────────
-const PEDESTRIAN_COUNT      = 50;
+const PEDESTRIAN_COUNT      = 40;
 const PEDESTRIAN_SPEED      = 1.6;
 const PEDESTRIAN_REPATH     = 8.0;
 const PEDESTRIAN_IDLE_TIME  = 2.5;
@@ -1390,11 +1390,19 @@ function _buildBegTargets() {
 
 
 function setBegTargetCooldown(targetId) {
-  const t = _begTargets[targetId];
-  if (!t) return;
-  t.cooldown = BEG_COOLDOWN;
-  t.mesh.visible = false;
-  _begGlobalCooldown = BEG_GLOBAL_COOLDOWN;
+  // Static targets (bottles, scrap)
+  if (_begTargets[targetId]) {
+    const t = _begTargets[targetId];
+    t.cooldown = BEG_COOLDOWN;
+    t.mesh.visible = false;
+    _begGlobalCooldown = BEG_GLOBAL_COOLDOWN;
+    return;
+  }
+  // Walking NPCs (pedestrians + customers)
+  const ped = pedestrianNPCs.find(p => p._id === targetId);
+  if (ped) { ped.begCooldown = BEG_COOLDOWN; _begGlobalCooldown = BEG_GLOBAL_COOLDOWN; return; }
+  const cust = customerNPCs.find(c => c._id === targetId);
+  if (cust) { cust.begCooldown = BEG_COOLDOWN; _begGlobalCooldown = BEG_GLOBAL_COOLDOWN; }
 }
 
 // ── Street Sweeper ─────────────────────────────────────────────
@@ -1770,6 +1778,8 @@ function loop() {
         if (t.cooldown <= 0) { t.cooldown = 0; t.mesh.visible = true; }
       }
     }
+    pedestrianNPCs.forEach(p => { if (p.begCooldown > 0) p.begCooldown -= dt; });
+    customerNPCs.forEach(c => { if (c.begCooldown > 0) c.begCooldown -= dt; });
 
     // ── Trash collection (proximity auto) ──
     if (_trashItems.length && gStateRef) {
@@ -1792,14 +1802,30 @@ function loop() {
     let interactKey     = null;
 
     if (gStateRef?.activeJob === 'beggar' && _begGlobalCooldown <= 0) {
-      for (const id in _begTargets) {
-        const t = _begTargets[id];
-        if (t.cooldown > 0) continue;
-        const d = Math.hypot(t.pos.x - player.group.position.x, t.pos.z - player.group.position.z);
-        if (d <= BEG_INTERACT_RADIUS) {
-          interactPayload = { type: 'beg', actionId: t.actionId, targetId: id };
-          interactKey = 'beg:' + id;
-          break;
+      const px = player.group.position.x, pz = player.group.position.z;
+      // Walking NPCs (pedestrians + customers) — ask_change
+      outer: for (const pool of [pedestrianNPCs, customerNPCs]) {
+        for (const npc of pool) {
+          if (npc.begCooldown > 0) continue;
+          const d = Math.hypot(npc.group.position.x - px, npc.group.position.z - pz);
+          if (d <= BEG_INTERACT_RADIUS) {
+            interactPayload = { type: 'beg', actionId: 'ask_change', targetId: npc._id };
+            interactKey = 'beg:' + npc._id;
+            break outer;
+          }
+        }
+      }
+      // Static targets (bottles, scrap)
+      if (!interactPayload) {
+        for (const id in _begTargets) {
+          const t = _begTargets[id];
+          if (t.cooldown > 0) continue;
+          const d = Math.hypot(t.pos.x - px, t.pos.z - pz);
+          if (d <= BEG_INTERACT_RADIUS) {
+            interactPayload = { type: 'beg', actionId: t.actionId, targetId: id };
+            interactKey = 'beg:' + id;
+            break;
+          }
         }
       }
     }
