@@ -20,6 +20,7 @@ const G = {
   sweepTask:        null,
   sweepCarry:       0,
   sweepCapacity:    500,
+  reputation:       0,
 };
 
 // ── Pause System ──────────────────────────────────────────────
@@ -85,9 +86,10 @@ function initGame() {
     G.workers          = saved.workers          ?? {};
     G.workerLevel      = saved.workerLevel      ?? {};
     G.fleetLevel       = saved.fleetLevel       ?? {};
+    G.reputation       = saved.reputation       ?? 0;
 
     if (saved.savedAt && G.ownedBusinesses.length > 0) {
-      const offline = calcOfflineEarnings(G.ownedBusinesses, saved.savedAt, G.workers, G.workerLevel, G.fleetLevel);
+      const offline = calcOfflineEarnings(G.ownedBusinesses, saved.savedAt, G.workers, G.workerLevel, G.fleetLevel, G.reputation);
       if (offline > 0) {
         G.capital      += offline;
         G.offlineEarned = offline;
@@ -332,6 +334,9 @@ function buyBusiness(bizId) {
   if (biz.category === 'transport') {
     if (!G.fleetLevel[bizId]) G.fleetLevel[bizId] = 1;
   }
+  if (biz.category === 'franchise') {
+    G.reputation += biz.repGain || 10;
+  }
   _startBizTimer(bizId);
   playPurchase();
   saveGame(G);
@@ -351,6 +356,7 @@ function hireWorker(bizId) {
 
   G.capital         -= cost;
   G.workers[bizId]   = current + 1;
+  if (biz.category === 'franchise') G.reputation += 2;
 
   playUpgrade();
   saveGame(G);
@@ -368,6 +374,7 @@ function upgradeWorkers(bizId) {
 
   G.capital           -= cost;
   G.workerLevel[bizId] = level + 1;
+  if (biz.category === 'franchise') G.reputation += 8;
 
   playUpgrade();
   saveGame(G);
@@ -426,6 +433,10 @@ function _startBizTimer(bizId) {
   }, biz.intervalMs);
 }
 
+function getReputationMult() {
+  return 1 + Math.min(G.reputation * REPUTATION_PER_INCOME, REPUTATION_INCOME_CAP);
+}
+
 function _calcBizIncome(bizId) {
   const biz        = BUSINESSES[bizId];
   const base       = _rand(biz.minIncome, biz.maxIncome);
@@ -436,7 +447,8 @@ function _calcBizIncome(bizId) {
   const fleetMult  = biz.category === 'transport'
     ? FLEET_LEVEL_MULT[G.fleetLevel[bizId] || 1]
     : 1;
-  return Math.floor(base * workerMult * levelMult * fleetMult);
+  const repMult    = biz.category === 'franchise' ? getReputationMult() : 1;
+  return Math.floor(base * workerMult * levelMult * fleetMult * repMult);
 }
 
 // ── Hold-to-Dump (sweep bin) ─────────────────────────────────
@@ -537,7 +549,8 @@ function getIncomePerSec() {
     const fleetMult  = biz.category === 'transport'
       ? FLEET_LEVEL_MULT[G.fleetLevel[bizId] || 1]
       : 1;
-    total += (avg * workerMult * levelMult * fleetMult) / (biz.intervalMs / 1000);
+    const repMult    = biz.category === 'franchise' ? getReputationMult() : 1;
+    total += (avg * workerMult * levelMult * fleetMult * repMult) / (biz.intervalMs / 1000);
   });
   return total;
 }

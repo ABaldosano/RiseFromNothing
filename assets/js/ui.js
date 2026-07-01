@@ -18,6 +18,8 @@ function renderStats() {
   document.getElementById('capital-display').textContent = fmt(G.capital);
   document.getElementById('total-earned').textContent    = fmt(G.totalEarned);
   document.getElementById('income-per-sec').textContent  = fmtRate(getIncomePerSec());
+  const repEl = document.getElementById('reputation-value');
+  if (repEl) repEl.textContent = Math.floor(G.reputation).toLocaleString();
 }
 
 function renderHeaderBadge() {
@@ -182,6 +184,7 @@ function renderBusinessSection() {
   const retailBizIds    = BIZ_ORDER.filter(id => BUSINESSES[id].category === 'retail');
   const transportBizIds = BIZ_ORDER.filter(id => BUSINESSES[id].category === 'transport');
   const propertyBizIds  = BIZ_ORDER.filter(id => BUSINESSES[id].category === 'property');
+  const franchiseBizIds = BIZ_ORDER.filter(id => BUSINESSES[id].category === 'franchise');
 
   _renderCategoryHeader(grid, '🏪 RETAIL');
   retailBizIds.forEach(bizId => _renderBizCard(grid, bizId));
@@ -191,6 +194,9 @@ function renderBusinessSection() {
 
   _renderCategoryHeader(grid, '🏠 REAL ESTATE');
   propertyBizIds.forEach(bizId => _renderBizCard(grid, bizId));
+
+  _renderCategoryHeader(grid, '🏬 FRANCHISES & CHAINS');
+  franchiseBizIds.forEach(bizId => _renderBizCard(grid, bizId));
 }
 
 function _renderCategoryHeader(container, label) {
@@ -227,8 +233,10 @@ function _renderBizCard(container, bizId) {
     const workerMult = 1 + wCount * biz.workerBonus;
     const levelMult  = [1, 1.5, 2][wLevel - 1];
     const fleetMult  = isTransport ? FLEET_LEVEL_MULT[G.fleetLevel[bizId] || 1] : 1;
-    const effMin = Math.floor(biz.minIncome * workerMult * levelMult * fleetMult);
-    const effMax = Math.floor(biz.maxIncome * workerMult * levelMult * fleetMult);
+    const isFranchise = biz.category === 'franchise';
+    const repMult    = isFranchise ? (1 + Math.min(G.reputation * REPUTATION_PER_INCOME, REPUTATION_INCOME_CAP)) : 1;
+    const effMin = Math.floor(biz.minIncome * workerMult * levelMult * fleetMult * repMult);
+    const effMax = Math.floor(biz.maxIncome * workerMult * levelMult * fleetMult * repMult);
 
     // Fleet upgrade row (transport only)
     let fleetRow = '';
@@ -251,9 +259,17 @@ function _renderBizCard(container, bizId) {
         </div>`;
     }
 
-    // Driver/tenant label (transport = drivers, property = tenants, retail = workers)
+    // Driver/tenant label (transport = drivers, property = tenants, retail/franchise = workers)
     const isProperty   = biz.category === 'property';
-    const workerLabel  = isTransport ? '🚴 Drivers' : (isProperty ? '🏠 Tenants' : '👷 Workers');
+    const workerLabel  = isTransport ? '🚴 Drivers' : (isProperty ? '🏠 Tenants' : (isFranchise ? '👔 Staff' : '👷 Workers'));
+
+    const brandingRow = isFranchise ? `
+      <div class="worker-row">
+        <div class="worker-info">
+          <span class="worker-label">🌟 Branding Bonus</span>
+          <span class="worker-level-badge branding">+${Math.floor(Math.min(G.reputation * REPUTATION_PER_INCOME, REPUTATION_INCOME_CAP) * 100)}%</span>
+        </div>
+      </div>` : '';
 
     footer = `
       <div class="biz-timer-wrap">
@@ -285,6 +301,7 @@ function _renderBizCard(container, bizId) {
           </button>
         </div>
         ${fleetRow}
+        ${brandingRow}
         <div class="worker-effective">
           Effective: ${CURRENCY}${effMin.toLocaleString()}–${CURRENCY}${effMax.toLocaleString()} / ${intervalSec}s
         </div>

@@ -156,13 +156,53 @@ const BUSINESSES = {
     upgradeCosts: [2_400_000, 8_000_000],
     category: 'property', propertyType: 'office',
   },
+
+  // ── Franchises & Chains (v6) ───────────────────────────
+  restaurant: {
+    name: 'Restaurant', emoji: '🍽️', icon: null,
+    description: 'Sit-down dining. Reputation matters here.',
+    cost: 1_200_000, minIncome: 55_000, maxIncome: 110_000, intervalMs: 45_000,
+    workerCost: 120_000, workerMax: 8, workerBonus: 0.20,
+    upgradeCosts: [350_000, 1_200_000],
+    category: 'franchise', repGain: 15,
+  },
+  convenience_chain: {
+    name: 'Convenience Chain', emoji: '🏪', icon: null,
+    description: 'Multiple branded locations across the city.',
+    cost: 2_500_000, minIncome: 110_000, maxIncome: 220_000, intervalMs: 50_000,
+    workerCost: 250_000, workerMax: 10, workerBonus: 0.18,
+    upgradeCosts: [700_000, 2_500_000],
+    category: 'franchise', repGain: 20,
+  },
+  grocery_chain: {
+    name: 'Grocery Chain', emoji: '🛍️', icon: null,
+    description: 'Full grocery chain with regional branding.',
+    cost: 5_000_000, minIncome: 220_000, maxIncome: 440_000, intervalMs: 60_000,
+    workerCost: 500_000, workerMax: 12, workerBonus: 0.16,
+    upgradeCosts: [1_400_000, 5_000_000],
+    category: 'franchise', repGain: 30,
+  },
+  supermarket: {
+    name: 'Supermarket', emoji: '🏢', icon: null,
+    description: 'Flagship supermarket. City-wide reputation driver.',
+    cost: 12_000_000, minIncome: 500_000, maxIncome: 950_000, intervalMs: 75_000,
+    workerCost: 1_100_000, workerMax: 15, workerBonus: 0.14,
+    upgradeCosts: [3_200_000, 12_000_000],
+    category: 'franchise', repGain: 45,
+  },
 };
 
 const BIZ_ORDER = [
   'food_cart', 'small_store', 'convenience_store', 'mini_market',
   'bicycle_courier', 'motorcycle_courier', 'delivery_van', 'logistics_company',
   'boarding_house', 'apartment', 'commercial_unit', 'office_building',
+  'restaurant', 'convenience_chain', 'grocery_chain', 'supermarket',
 ];
+
+// ── Reputation (v6) ────────────────────────────────────
+const REPUTATION_INCOME_CAP  = 1.0;
+const REPUTATION_PER_INCOME  = 0.002;
+const REPUTATION_TRAFFIC_CAP = 3;
 
 // ── Delivery Routes (v4) ──────────────────────────────
 // Each route defines waypoints for vehicle NPC paths in world.js

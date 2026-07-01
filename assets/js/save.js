@@ -15,6 +15,7 @@ function saveGame(state) {
       workers:         state.workers,
       workerLevel:     state.workerLevel,
       fleetLevel:      state.fleetLevel,   // v4
+      reputation:      state.reputation,   // v6
       savedAt:         Date.now(),
     };
     localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
@@ -38,10 +39,11 @@ function deleteSave() {
   localStorage.removeItem(SAVE_KEY);
 }
 
-function calcOfflineEarnings(ownedBusinesses, savedAt, workers, workerLevel, fleetLevel) {
+function calcOfflineEarnings(ownedBusinesses, savedAt, workers, workerLevel, fleetLevel, reputation) {
   const now     = Date.now();
   const elapsed = Math.min(now - savedAt, OFFLINE_CAP);
   let   total   = 0;
+  const repMult = 1 + Math.min((reputation || 0) * REPUTATION_PER_INCOME, REPUTATION_INCOME_CAP);
 
   ownedBusinesses.forEach(bizId => {
     const biz = BUSINESSES[bizId];
@@ -57,7 +59,9 @@ function calcOfflineEarnings(ownedBusinesses, savedAt, workers, workerLevel, fle
     const fleetMult  = biz.category === 'transport'
       ? [1, 1, 1.6, 2.5][fLevel] ?? 1
       : 1;
-    total += ticks * avg * workerMult * levelMult * fleetMult;
+    // v6: reputation multiplier for franchise businesses
+    const bizRepMult = biz.category === 'franchise' ? repMult : 1;
+    total += ticks * avg * workerMult * levelMult * fleetMult * bizRepMult;
   });
 
   return Math.floor(total);

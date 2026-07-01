@@ -22,6 +22,10 @@ const BIZ_COLORS = {
   apartment:          0x5c6bc0,
   commercial_unit:    0x26a69a,
   office_building:    0x78909c,
+  restaurant:          0xe64980,
+  convenience_chain:   0xfab005,
+  grocery_chain:       0x40c057,
+  supermarket:         0x228be6,
 };
 
 const VEHICLE_COLORS = {
@@ -54,6 +58,10 @@ const BUSINESS_POS = {
   apartment:          { x: BLOCK_W - 14, z: -14 },
   commercial_unit:    { x: BLOCK_W - 14, z:  12 },
   office_building:    { x: BLOCK_W - 14, z:  36 },
+  restaurant:          { x: 32, z: -52 },
+  convenience_chain:   { x: 32, z: -26 },
+  grocery_chain:       { x: 32, z:  26 },
+  supermarket:         { x: 32, z:  52 },
 };
 
 const COLLECTION_POINT = { x: 0, z: 46 };
@@ -750,6 +758,32 @@ function makeBusinessMesh(bizId, x, z) {
   const biz   = (typeof BUSINESSES !== 'undefined') ? BUSINESSES[bizId] : null;
   const isTransport = biz?.category === 'transport';
   let mesh;
+
+  const isFranchise = biz?.category === 'franchise';
+
+  if (isFranchise) {
+    const lotSize = bizId === 'supermarket' ? 8 : bizId === 'grocery_chain' ? 7 : 6;
+    const height  = bizId === 'supermarket' ? 4.5 : bizId === 'grocery_chain' ? 4 : 3.2;
+    const lot = new THREE.Mesh(new THREE.PlaneGeometry(lotSize + 2, lotSize + 1),
+      new THREE.MeshStandardMaterial({ color: 0x37474f }));
+    lot.rotation.x = -Math.PI / 2; lot.position.y = 0.09;
+    const building = new THREE.Mesh(new THREE.BoxGeometry(lotSize, height, lotSize - 1),
+      new THREE.MeshStandardMaterial({ color, transparent: true }));
+    building.position.y = height / 2;
+    const signPole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.2, 6),
+      new THREE.MeshStandardMaterial({ color: 0x333333 }));
+    signPole.position.set(0, 1.1, lotSize / 2 + 0.6);
+    const signBoard = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.7, 0.1),
+      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.4 }));
+    signBoard.position.set(0, 2.4, lotSize / 2 + 0.6);
+    g.add(lot, building, signPole, signBoard);
+    mesh = building;
+    addBoxCollider(x, z, lotSize / 2 + 0.3, lotSize / 2 + 0.3);
+    g.position.set(x, 0, z);
+    g.userData.mainMesh = mesh;
+    g.userData.bizId    = bizId;
+    return g;
+  }
 
   if (isTransport) {
     const platform = new THREE.Mesh(new THREE.BoxGeometry(6, 0.2, 5),
@@ -1893,15 +1927,22 @@ function loop() {
     if (gStateRef) {
       Object.keys(customerSpawnTimers).forEach(bizId => {
         if (!gStateRef.ownedBusinesses.includes(bizId)) return;
-        if (typeof BUSINESSES !== 'undefined' && BUSINESSES[bizId]?.category !== 'retail') return;
+        const bizDef = typeof BUSINESSES !== 'undefined' ? BUSINESSES[bizId] : null;
+        const isTrafficBiz = bizDef?.category === 'retail' || bizDef?.category === 'franchise';
+        if (!isTrafficBiz) return;
         customerSpawnTimers[bizId] -= dt;
         if (customerSpawnTimers[bizId] <= 0) {
-          if (customerNPCs.filter(c => c.bizId === bizId).length < 2) {
+          // v6: reputation raises the concurrent customer-traffic cap for franchises
+          const repBonus = bizDef?.category === 'franchise'
+            ? Math.min(Math.floor((gStateRef.reputation || 0) / 100), REPUTATION_TRAFFIC_CAP)
+            : 0;
+          const maxConcurrent = 2 + repBonus;
+          if (customerNPCs.filter(c => c.bizId === bizId).length < maxConcurrent) {
             const pos = BUSINESS_POS[bizId];
             const c = new CustomerNPC({ x: pos.x, z: CUSTOMER_SPAWN.z }, pos, { x: pos.x, z: CUSTOMER_END.z }, bizId);
             customerNPCs.push(c); scene.add(c.group);
           }
-          customerSpawnTimers[bizId] = 4 + Math.random() * 5;
+          customerSpawnTimers[bizId] = Math.max(1.5, (4 + Math.random() * 5) - repBonus);
         }
       });
     }
