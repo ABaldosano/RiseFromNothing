@@ -8,7 +8,7 @@ const OFFLINE_CAP = 8 * 60 * 60 * 1000;
 // ── Jobs ──────────────────────────────────────────────
 const JOBS = {
   beggar: {
-    name: 'Beggar', emoji: '🧍', icon: 'assets/images/ui/icon_beggar.png',
+    name: 'Beggar', emoji: 'BEG', icon: 'assets/images/ui/icon_beggar.png',
     description: 'Starting from zero on the street.',
     unlockCost: 0,
     actions: [
@@ -18,7 +18,7 @@ const JOBS = {
     ],
   },
   street_sweeper: {
-    name: 'Street Sweeper', emoji: '🧹', icon: 'assets/images/ui/icon_sweeper.png',
+    name: 'Street Sweeper', emoji: 'SWP', icon: 'assets/images/ui/icon_sweeper.png',
     description: 'Keeping the city clean, one block at a time.',
     unlockCost: 100,
     actions: [
@@ -27,7 +27,7 @@ const JOBS = {
     ],
   },
   garbage_collector: {
-    name: 'Garbage Collector', emoji: '🗑️', icon: 'assets/images/ui/icon_trashbin.png',
+    name: 'Garbage Collector', emoji: 'GRB', icon: 'assets/images/ui/icon_trashbin.png',
     description: 'Early mornings, heavy loads, steady pay.',
     unlockCost: 1000,
     actions: [
@@ -36,7 +36,7 @@ const JOBS = {
     ],
   },
   courier: {
-    name: 'Courier', emoji: '🚴', icon: 'assets/images/ui/icon_courier.png',
+    name: 'Courier', emoji: 'CUR', icon: 'assets/images/ui/icon_courier.png',
     description: 'Fast deliveries across the city.',
     unlockCost: 8_000,
     actions: [
@@ -53,7 +53,7 @@ const JOB_ORDER = ['beggar', 'street_sweeper', 'garbage_collector', 'courier'];
 // upgradeCosts: [cost→lvl2, cost→lvl3]  level multipliers: 1x, 1.5x, 2x
 const BUSINESSES = {
   food_cart: {
-    name: 'Food Cart', emoji: '🍢', icon: 'assets/images/ui/icon_foodcart.png',
+    name: 'Food Cart', emoji: 'FC', icon: 'assets/images/ui/icon_foodcart.png',
     description: 'Street food that feeds the neighborhood.',
     cost: 5_000, minIncome: 200, maxIncome: 500, intervalMs: 10_000,
     workerCost: 800,  workerMax: 3, workerBonus: 0.30,
@@ -61,7 +61,7 @@ const BUSINESSES = {
     category: 'retail',
   },
   small_store: {
-    name: 'Small Store', emoji: '🏪', icon: 'assets/images/ui/icon_storefront.png',
+    name: 'Small Store', emoji: 'STR', icon: 'assets/images/ui/icon_storefront.png',
     description: 'Your first real business address.',
     cost: 25_000, minIncome: 1_000, maxIncome: 5_000, intervalMs: 30_000,
     workerCost: 3_000, workerMax: 5, workerBonus: 0.25,
@@ -69,7 +69,7 @@ const BUSINESSES = {
     category: 'retail',
   },
   convenience_store: {
-    name: 'Convenience Store', emoji: '🛒', icon: 'assets/images/ui/icon_storefront.png',
+    name: 'Convenience Store', emoji: 'CVS', icon: 'assets/images/ui/icon_storefront.png',
     description: 'Open 24/7. Customers keep coming.',
     cost: 75_000, minIncome: 3_000, maxIncome: 8_000, intervalMs: 45_000,
     workerCost: 8_000, workerMax: 5, workerBonus: 0.25,
@@ -77,7 +77,7 @@ const BUSINESSES = {
     category: 'retail',
   },
   mini_market: {
-    name: 'Mini Market', emoji: '🏬', icon: 'assets/images/ui/icon_storefront.png',
+    name: 'Mini Market', emoji: 'MKT', icon: 'assets/images/ui/icon_storefront.png',
     description: 'A full market under your name.',
     cost: 200_000, minIncome: 10_000, maxIncome: 25_000, intervalMs: 60_000,
     workerCost: 20_000, workerMax: 8, workerBonus: 0.20,
@@ -87,7 +87,7 @@ const BUSINESSES = {
 
   // ── Transportation ────────────────────────────────────
   bicycle_courier: {
-    name: 'Bicycle Courier', emoji: '🚲', icon: 'assets/images/ui/icon_vehicle_bicycle.png',
+    name: 'Bicycle Courier', emoji: 'BC', icon: 'assets/images/ui/icon_vehicle_bicycle.png',
     description: 'Pedal-powered deliveries across the district.',
     cost: 15_000, minIncome: 800, maxIncome: 1_800, intervalMs: 12_000,
     workerCost: 2_000, workerMax: 4, workerBonus: 0.28,
@@ -96,7 +96,7 @@ const BUSINESSES = {
     vehicleType: 'bicycle',
   },
   motorcycle_courier: {
-    name: 'Motorcycle Courier', emoji: '🏍️', icon: 'assets/images/ui/icon_vehicle_motorcycle.png',
+    name: 'Motorcycle Courier', emoji: 'MC', icon: 'assets/images/ui/icon_vehicle_motorcycle.png',
     description: 'Faster, farther, more profitable.',
     cost: 60_000, minIncome: 3_500, maxIncome: 7_000, intervalMs: 20_000,
     workerCost: 8_000, workerMax: 5, workerBonus: 0.25,
@@ -105,7 +105,7 @@ const BUSINESSES = {
     vehicleType: 'motorcycle',
   },
   delivery_van: {
-    name: 'Delivery Van', emoji: '🚐', icon: 'assets/images/ui/icon_vehicle_van.png',
+    name: 'Delivery Van', emoji: 'DV', icon: 'assets/images/ui/icon_vehicle_van.png',
     description: 'Bulk deliveries, bigger margins.',
     cost: 180_000, minIncome: 12_000, maxIncome: 24_000, intervalMs: 35_000,
     workerCost: 22_000, workerMax: 6, workerBonus: 0.22,
@@ -114,7 +114,7 @@ const BUSINESSES = {
     vehicleType: 'van',
   },
   logistics_company: {
-    name: 'Logistics Company', emoji: '🚛', icon: 'assets/images/ui/icon_vehicle_truck.png',
+    name: 'Logistics Company', emoji: 'LC', icon: 'assets/images/ui/icon_vehicle_truck.png',
     description: 'Fleet of trucks. City-wide supply chains.',
     cost: 500_000, minIncome: 40_000, maxIncome: 90_000, intervalMs: 60_000,
     workerCost: 60_000, workerMax: 10, workerBonus: 0.18,
@@ -125,7 +125,7 @@ const BUSINESSES = {
 
   // ── Real Estate ────────────────────────────────────────
   boarding_house: {
-    name: 'Boarding House', emoji: '🏠', icon: 'assets/images/ui/icon_re_house.png',
+    name: 'Boarding House', emoji: 'BH', icon: 'assets/images/ui/icon_re_house.png',
     description: 'Small rooms, steady rent.',
     cost: 700_000, minIncome: 35_000, maxIncome: 70_000, intervalMs: 60_000,
     workerCost: 80_000, workerMax: 6, workerBonus: 0.18,
@@ -133,7 +133,7 @@ const BUSINESSES = {
     category: 'property', propertyType: 'rental_house',
   },
   apartment: {
-    name: 'Apartment', emoji: '🏢', icon: 'assets/images/ui/ico_re_apartment.png',
+    name: 'Apartment', emoji: 'APT', icon: 'assets/images/ui/ico_re_apartment.png',
     description: 'Multi-unit residential income.',
     cost: 1_500_000, minIncome: 70_000, maxIncome: 150_000, intervalMs: 75_000,
     workerCost: 180_000, workerMax: 8, workerBonus: 0.16,
@@ -141,7 +141,7 @@ const BUSINESSES = {
     category: 'property', propertyType: 'apartment',
   },
   commercial_unit: {
-    name: 'Commercial Unit', emoji: '🏬', icon: 'assets/images/ui/ico_re_apartment.png',
+    name: 'Commercial Unit', emoji: 'CML', icon: 'assets/images/ui/ico_re_apartment.png',
     description: 'Leased retail and office space.',
     cost: 3_500_000, minIncome: 160_000, maxIncome: 320_000, intervalMs: 90_000,
     workerCost: 400_000, workerMax: 10, workerBonus: 0.14,
@@ -149,7 +149,7 @@ const BUSINESSES = {
     category: 'property', propertyType: 'apartment',
   },
   office_building: {
-    name: 'Office Building', emoji: '🏙️', icon: 'assets/images/ui/ico_re_apartment.png',
+    name: 'Office Building', emoji: 'OFC', icon: 'assets/images/ui/ico_re_apartment.png',
     description: 'Corporate tenants, premium rent.',
     cost: 8_000_000, minIncome: 380_000, maxIncome: 750_000, intervalMs: 120_000,
     workerCost: 900_000, workerMax: 12, workerBonus: 0.12,
@@ -159,7 +159,7 @@ const BUSINESSES = {
 
   // ── Franchises & Chains (v6) ───────────────────────────
   restaurant: {
-    name: 'Restaurant', emoji: '🍽️', icon: null,
+    name: 'Restaurant', emoji: 'RST', icon: null,
     description: 'Sit-down dining. Reputation matters here.',
     cost: 1_200_000, minIncome: 55_000, maxIncome: 110_000, intervalMs: 45_000,
     workerCost: 120_000, workerMax: 8, workerBonus: 0.20,
@@ -167,7 +167,7 @@ const BUSINESSES = {
     category: 'franchise', repGain: 15,
   },
   convenience_chain: {
-    name: 'Convenience Chain', emoji: '🏪', icon: null,
+    name: 'Convenience Chain', emoji: 'CVC', icon: null,
     description: 'Multiple branded locations across the city.',
     cost: 2_500_000, minIncome: 110_000, maxIncome: 220_000, intervalMs: 50_000,
     workerCost: 250_000, workerMax: 10, workerBonus: 0.18,
@@ -175,7 +175,7 @@ const BUSINESSES = {
     category: 'franchise', repGain: 20,
   },
   grocery_chain: {
-    name: 'Grocery Chain', emoji: '🛍️', icon: null,
+    name: 'Grocery Chain', emoji: 'GRO', icon: null,
     description: 'Full grocery chain with regional branding.',
     cost: 5_000_000, minIncome: 220_000, maxIncome: 440_000, intervalMs: 60_000,
     workerCost: 500_000, workerMax: 12, workerBonus: 0.16,
@@ -183,7 +183,7 @@ const BUSINESSES = {
     category: 'franchise', repGain: 30,
   },
   supermarket: {
-    name: 'Supermarket', emoji: '🏢', icon: null,
+    name: 'Supermarket', emoji: 'SPM', icon: null,
     description: 'Flagship supermarket. City-wide reputation driver.',
     cost: 12_000_000, minIncome: 500_000, maxIncome: 950_000, intervalMs: 75_000,
     workerCost: 1_100_000, workerMax: 15, workerBonus: 0.14,

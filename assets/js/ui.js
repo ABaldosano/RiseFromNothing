@@ -140,7 +140,7 @@ function renderUnlockSection() {
   const locked = JOB_ORDER.filter(id => !G.unlockedJobs.includes(id));
 
   if (locked.length === 0) {
-    list.innerHTML = '<p class="all-unlocked">All career upgrades unlocked! 🎉</p>';
+    list.innerHTML = '<p class="all-unlocked">All career upgrades unlocked.</p>';
     return;
   }
 
@@ -186,16 +186,16 @@ function renderBusinessSection() {
   const propertyBizIds  = BIZ_ORDER.filter(id => BUSINESSES[id].category === 'property');
   const franchiseBizIds = BIZ_ORDER.filter(id => BUSINESSES[id].category === 'franchise');
 
-  _renderCategoryHeader(grid, '🏪 RETAIL');
+  _renderCategoryHeader(grid, 'RETAIL');
   retailBizIds.forEach(bizId => _renderBizCard(grid, bizId));
 
-  _renderCategoryHeader(grid, '🚚 TRANSPORTATION');
+  _renderCategoryHeader(grid, 'TRANSPORTATION');
   transportBizIds.forEach(bizId => _renderBizCard(grid, bizId));
 
-  _renderCategoryHeader(grid, '🏠 REAL ESTATE');
+  _renderCategoryHeader(grid, 'REAL ESTATE');
   propertyBizIds.forEach(bizId => _renderBizCard(grid, bizId));
 
-  _renderCategoryHeader(grid, '🏬 FRANCHISES & CHAINS');
+  _renderCategoryHeader(grid, 'FRANCHISES & CHAINS');
   franchiseBizIds.forEach(bizId => _renderBizCard(grid, bizId));
 }
 
@@ -248,7 +248,7 @@ function _renderBizCard(container, bizId) {
       fleetRow = `
         <div class="worker-row">
           <div class="worker-info">
-            <span class="worker-label">🚗 Fleet</span>
+            <span class="worker-label">FLEET</span>
             <span class="worker-level-badge lv${fLevel}">${FLEET_LEVEL_NAMES[fLevel]}</span>
           </div>
           <button class="btn-worker ${fCanAfford ? 'can-afford' : ''}"
@@ -261,12 +261,12 @@ function _renderBizCard(container, bizId) {
 
     // Driver/tenant label (transport = drivers, property = tenants, retail/franchise = workers)
     const isProperty   = biz.category === 'property';
-    const workerLabel  = isTransport ? '🚴 Drivers' : (isProperty ? '🏠 Tenants' : (isFranchise ? '👔 Staff' : '👷 Workers'));
+    const workerLabel  = isTransport ? 'DRIVERS' : (isProperty ? 'TENANTS' : (isFranchise ? 'STAFF' : 'WORKERS'));
 
     const brandingRow = isFranchise ? `
       <div class="worker-row">
         <div class="worker-info">
-          <span class="worker-label">🌟 Branding Bonus</span>
+          <span class="worker-label">BRANDING BONUS</span>
           <span class="worker-level-badge branding">+${Math.floor(Math.min(G.reputation * REPUTATION_PER_INCOME, REPUTATION_INCOME_CAP) * 100)}%</span>
         </div>
       </div>` : '';
@@ -291,7 +291,7 @@ function _renderBizCard(container, bizId) {
         </div>
         <div class="worker-row">
           <div class="worker-info">
-            <span class="worker-label">⭐ Staff Level</span>
+            <span class="worker-label">STAFF LEVEL</span>
             <span class="worker-level-badge lv${wLevel}">${LEVEL_NAMES[wLevel]}</span>
           </div>
           <button class="btn-worker ${canUpgrade ? 'can-afford' : ''}"
@@ -311,7 +311,7 @@ function _renderBizCard(container, bizId) {
       <button class="btn-buy ${canAfford ? 'can-afford' : ''}"
         onclick="buyBusiness('${bizId}')"
         ${canAfford ? '' : 'disabled'}>
-        ${canAfford ? '✓ BUY — ' + fmt(biz.cost) : 'NEED ' + fmt(biz.cost)}
+        ${canAfford ? 'BUY — ' + fmt(biz.cost) : 'NEED ' + fmt(biz.cost)}
       </button>`;
   }
 

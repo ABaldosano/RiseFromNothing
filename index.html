@@ -72,13 +72,13 @@
 
       <div id="panel-tabs">
         <button class="panel-tab active" onclick="switchPanelTab('job', this)">
-          <span class="ptab-icon">👤</span><span class="ptab-label">JOB</span>
+          <span class="ptab-label">JOB</span>
         </button>
         <button class="panel-tab" onclick="switchPanelTab('unlock', this)">
-          <span class="ptab-icon">🔓</span><span class="ptab-label">CAREER</span>
+          <span class="ptab-label">CAREER</span>
         </button>
         <button class="panel-tab" onclick="switchPanelTab('business', this)">
-          <span class="ptab-icon">🏢</span><span class="ptab-label">BIZ</span>
+          <span class="ptab-label">BIZ</span>
         </button>
       </div>
 
@@ -88,7 +88,7 @@
 
         <section class="game-section" id="job-section">
           <div class="section-header">
-            <span class="section-icon">👤</span>
+            
             <h2 class="section-title">YOUR JOB</h2>
             <span class="section-badge" id="current-job-name-panel">Beggar</span>
           </div>
@@ -98,7 +98,7 @@
 
         <section class="game-section" id="unlock-section">
           <div class="section-header">
-            <span class="section-icon">🔓</span>
+            
             <h2 class="section-title">CAREER UPGRADES</h2>
           </div>
           <div class="unlock-list" id="unlock-list"></div>
@@ -106,7 +106,7 @@
 
         <section class="game-section" id="business-section">
           <div class="section-header">
-            <span class="section-icon">🏢</span>
+            
             <h2 class="section-title">BUSINESSES</h2>
           </div>
           <div class="business-grid" id="business-grid"></div>
@@ -118,7 +118,7 @@
     <div id="offline-modal" class="modal hidden">
       <div class="modal-overlay" onclick="closeOfflineModal()"></div>
       <div class="modal-card">
-        <div class="modal-icon">💰</div>
+        <div class="modal-icon">$</div>
         <h3 class="modal-title">WELCOME BACK</h3>
         <p class="modal-text">Your businesses kept grinding while you were away.</p>
         <div class="modal-amount" id="offline-amount">+$0</div>
@@ -162,7 +162,7 @@
   rotateOverlay.id = 'rotate-device-overlay';
   rotateOverlay.innerHTML = `
     <div class="rotate-card">
-      <div class="rotate-icon">📱</div>
+      <div class="rotate-icon">&#x27F3;</div>
       <div class="rotate-title">Rotate Device</div>
       <div class="rotate-subtitle">Enable auto-rotate and switch to landscape to play.</div>
     </div>
