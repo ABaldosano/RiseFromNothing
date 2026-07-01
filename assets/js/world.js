@@ -73,8 +73,8 @@ const CUSTOMER_END     = { x: 14, z:  56 };
 const BEG_INTERACT_RADIUS = 2.4;
 const BEG_COOLDOWN        = 15;
 const BEG_GLOBAL_COOLDOWN = 0.6;
-const BEG_TARGET_COUNT    = 72;
-const BEG_MIN_SPACING     = 6;
+const BEG_TARGET_COUNT    = 52;
+const BEG_MIN_SPACING     = 7;
 const BEG_ACTION_TYPES    = ['collect_bottles', 'collect_scrap']; // ask_change handled by walking NPCs
 
 // ── Street Sweeper Zones ──────────────────────────────────────
@@ -87,10 +87,12 @@ const SWEEP_ZONES = {
 };
 
 // ── Pedestrian system ─────────────────────────────────────────
-const PEDESTRIAN_COUNT      = 100;
+const PEDESTRIAN_COUNT      = 64;
 const PEDESTRIAN_SPEED      = 1.6;
 const PEDESTRIAN_REPATH     = 8.0;
 const PEDESTRIAN_IDLE_TIME  = 2.5;
+const STUCK_CHECK_INTERVAL  = 1.6;
+const STUCK_MIN_MOVE        = 0.35;
 
 // Pedestrian waypoint zones: sidewalks, park paths, park interior
 // These are world-space rectangular zones pedestrians pick goals from
@@ -130,6 +132,48 @@ let   cameraZoom = 22;
 // ── Map layout constants ───────────────────────────────────────
 const LOOP_Z  = 60;
 const LOOP_X  = 90;
+
+// ── Road tarmac zones (block pedestrian pathfinding — foot traffic
+// must use sidewalks and only cross at marked crosswalks) ─────────
+// Local (per-block, unshifted) rectangles. cx/cz = center, w = x-extent, h = z-extent.
+const ROAD_TARMAC_ZONES = [
+  // West road: main lane + outer lane (sidewalks at x -12..-7 / 7..12 stay open)
+  { cx: 0,  cz: 0, w: 14, h: 130 },
+  { cx: -17, cz: 0, w: 10, h: 130 },
+  // East road: main lane + outer lane
+  { cx: LOOP_X,      cz: 0, w: 14, h: 130 },
+  { cx: LOOP_X + 17, cz: 0, w: 10, h: 130 },
+  // North / South roads (sidewalks already flush, no extra outer lane)
+  { cx: LOOP_X / 2, cz:  LOOP_Z, w: 96, h: 12 },
+  { cx: LOOP_X / 2, cz: -LOOP_Z, w: 96, h: 12 },
+];
+
+// Crosswalk gaps cut through the tarmac zones above — pedestrians may
+// only cross here. Rendered as zebra stripes in buildCrosswalks().
+const CROSSWALK_ZONES = [
+  { cx: -5,          cz: 0,   w: 34, h: 6, dir: 'z' },
+  { cx: -5,          cz: -40, w: 34, h: 6, dir: 'z' },
+  { cx: -5,          cz:  40, w: 34, h: 6, dir: 'z' },
+  { cx: LOOP_X + 7.5, cz: 0,   w: 30, h: 6, dir: 'z' },
+  { cx: LOOP_X + 7.5, cz: -40, w: 30, h: 6, dir: 'z' },
+  { cx: LOOP_X + 7.5, cz:  40, w: 30, h: 6, dir: 'z' },
+  { cx: 25, cz:  LOOP_Z, w: 6, h: 12, dir: 'x' },
+  { cx: 65, cz:  LOOP_Z, w: 6, h: 12, dir: 'x' },
+  { cx: 25, cz: -LOOP_Z, w: 6, h: 12, dir: 'x' },
+  { cx: 65, cz: -LOOP_Z, w: 6, h: 12, dir: 'x' },
+];
+
+// Inter-quadrant connector bridges (also tarmac — pedestrians don't cross
+// these; they have no sidewalks). Defined once, in absolute world space,
+// linking every pair of adjacent quadrants so the 2x2 map has no dead seams.
+const CONNECTOR_W = BLOCK_W - LOOP_X + 20;
+const CONNECTOR_H = BLOCK_H - LOOP_Z * 2 + 20;
+const QUAD_CONNECTORS = [
+  { cx: -(LOOP_X + CONNECTOR_W / 2), cz: 0,           w: CONNECTOR_W, h: 10, axis: 'x' }, // home ↔ west
+  { cx: LOOP_X / 2, cz: -(LOOP_Z + CONNECTOR_H / 2),  w: 10, h: CONNECTOR_H, axis: 'z' }, // home ↔ south
+  { cx: -(LOOP_X + CONNECTOR_W / 2) - BLOCK_W, cz: 0, w: CONNECTOR_W, h: 10, axis: 'x' }, // south ↔ both
+  { cx: LOOP_X / 2, cz: -(LOOP_Z + CONNECTOR_H / 2) - BLOCK_H, w: 10, h: CONNECTOR_H, axis: 'z' }, // west ↔ both
+];
 
 // ── Pause State ───────────────────────────────────────────────
 let _paused = false;
@@ -219,6 +263,8 @@ function _updateDayNight(dt) {
       if (m.material?.emissiveIntensity !== undefined)
         m.material.emissiveIntensity = 0.1 + lampIntensity * 0.8;
     });
+    const winIntensity = 0.08 + lampIntensity * 0.7;
+    _buildingWindowMats.forEach(m => { m.emissiveIntensity = winIntensity; });
   }
 }
 
@@ -259,16 +305,28 @@ function _updateEntityCulling() {
   pedestrianNPCs.forEach(p => cullGroup(p.group));
 }
 
-function addBoxCollider(cx, cz, hw, hd) {
-  _staticColliders.push({ minX: cx - hw, maxX: cx + hw, minZ: cz - hd, maxZ: cz + hd });
+function addBoxCollider(cx, cz, hw, hd, opts) {
+  _staticColliders.push({
+    minX: cx - hw, maxX: cx + hw, minZ: cz - hd, maxZ: cz + hd,
+    steppable: !!(opts && opts.steppable),
+  });
 }
 
-function resolveStaticCollisions(pos, radius) {
+// Low curbs/islands (roundabouts, the central park) the player can hop
+// onto — still solid ground for NPC pathfinding, but not a wall for the
+// player once airborne or already standing on top of them.
+function addSteppableCollider(cx, cz, hw, hd) {
+  addBoxCollider(cx, cz, hw, hd, { steppable: true });
+}
+
+function resolveStaticCollisions(pos, radius, playerMode) {
   const r = radius || PLAYER_RADIUS;
   for (let pass = 0; pass < 2; pass++) {
     for (const box of _staticColliders) {
+      if (playerMode && box.steppable && !playerMode.grounded) continue; // jumping clears it
       if (pos.x + r > box.minX && pos.x - r < box.maxX &&
           pos.z + r > box.minZ && pos.z - r < box.maxZ) {
+        if (playerMode && box.steppable && playerMode.onTop) continue; // already standing on it
         const pushL = (pos.x + r) - box.minX;
         const pushR = box.maxX   - (pos.x - r);
         const pushF = (pos.z + r) - box.minZ;
@@ -309,8 +367,8 @@ function resolveDynamicCollisions(pos, radius, selfId) {
   }
 }
 
-function resolveCollisions(pos, radius, selfId) {
-  resolveStaticCollisions(pos, radius);
+function resolveCollisions(pos, radius, selfId, playerMode) {
+  resolveStaticCollisions(pos, radius, playerMode);
   if (selfId !== undefined) resolveDynamicCollisions(pos, radius, selfId);
 }
 
@@ -336,6 +394,18 @@ function _cellToWorld(col, row) {
   };
 }
 
+function _markGridRect(cx, cz, w, h, value) {
+  const minX = cx - w / 2, maxX = cx + w / 2;
+  const minZ = cz - h / 2, maxZ = cz + h / 2;
+  const c0 = Math.max(0, Math.floor((minX - PF_ORIGIN.x) / PF_CELL));
+  const c1 = Math.min(PF_COLS - 1, Math.ceil((maxX - PF_ORIGIN.x) / PF_CELL));
+  const r0 = Math.max(0, Math.floor((minZ - PF_ORIGIN.z) / PF_CELL));
+  const r1 = Math.min(PF_ROWS - 1, Math.ceil((maxZ - PF_ORIGIN.z) / PF_CELL));
+  for (let r = r0; r <= r1; r++)
+    for (let c = c0; c <= c1; c++)
+      _pfGrid[r * PF_COLS + c] = value;
+}
+
 function _buildGrid() {
   _pfGrid = new Uint8Array(PF_COLS * PF_ROWS);
   for (const box of _staticColliders) {
@@ -347,6 +417,16 @@ function _buildGrid() {
       for (let c = c0; c <= c1; c++)
         _pfGrid[r * PF_COLS + c] = 1;
   }
+
+  // Block road tarmac in every quadrant, then reopen marked crosswalks
+  // so pedestrians only cross roads at legal crossing points.
+  QUAD_OFFSETS.forEach(q => {
+    ROAD_TARMAC_ZONES.forEach(z => _markGridRect(z.cx + q.x, z.cz + q.z, z.w, z.h, 1));
+  });
+  QUAD_CONNECTORS.forEach(c => _markGridRect(c.cx, c.cz, c.w, c.h, 1));
+  QUAD_OFFSETS.forEach(q => {
+    CROSSWALK_ZONES.forEach(z => _markGridRect(z.cx + q.x, z.cz + q.z, z.w, z.h, 0));
+  });
 }
 
 function _pfIdx(col, row) { return row * PF_COLS + col; }
@@ -393,7 +473,7 @@ function _aStar(sx, sz, ex, ez) {
   const COSTS = [1, 1, 1, 1, 1.414, 1.414, 1.414, 1.414];
 
   let iters = 0;
-  while (open.size > 0 && iters++ < 4000) {
+  while (open.size > 0 && iters++ < 7000) {
     let cur = -1, bestF = Infinity;
     for (const idx of open) { if (f[idx] < bestF) { bestF = f[idx]; cur = idx; } }
     if (cur === endIdx) break;
@@ -515,6 +595,8 @@ let onInteract = null;
 let lastInteract = null;
 let _entityCounter = 0;
 let _streetLights  = [];
+let _buildingOccluders  = [];
+let _buildingWindowMats = [];
 
 // ── Beggar / Street Sweeper state ─────────────────────────────
 let _begTargets   = {};
@@ -634,6 +716,107 @@ function makeFountain(x, z) {
   g.position.set(x, 0, z);
   addBoxCollider(x, z, 2.8, 2.8);
   return g;
+}
+
+// ── City Skyline Buildings ──────────────────────────────────────
+const BUILDING_PALETTE = [0x37414d, 0x3e4a52, 0x455563, 0x2f3a44, 0x4a4038, 0x394a3d, 0x3c3348];
+// Avatar stands ~1.9 units tall (capsule + head). A floor needs headroom
+// above that, so each storey is scaled up from the avatar's height.
+const AVATAR_HEIGHT = 1.9;
+const FLOOR_HEIGHT   = AVATAR_HEIGHT * 1.8;
+
+function _makeWindowTexture() {
+  const w = 48, h = 96;
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#12141a';
+  ctx.fillRect(0, 0, w, h);
+  const cols = 5, rows = 10;
+  const cw = w / cols, ch = h / rows;
+  for (let r = 0; r < rows; r++) {
+    for (let col = 0; col < cols; col++) {
+      if (Math.random() < 0.3) continue;
+      const lit = Math.random() < 0.5;
+      ctx.fillStyle = lit ? '#ffdf8a' : '#20262f';
+      ctx.fillRect(col * cw + 2, r * ch + 2, cw - 4, ch - 4);
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+function makeCityBuilding(x, z, maxW, maxD, hMin, hMax) {
+  maxW = maxW ?? 10; maxD = maxD ?? 10; hMin = hMin ?? 7; hMax = hMax ?? 16;
+  const width  = maxW * (0.55 + Math.random() * 0.45);
+  const depth  = maxD * (0.55 + Math.random() * 0.45);
+  const height = hMin + Math.random() * (hMax - hMin);
+  const color  = BUILDING_PALETTE[Math.floor(Math.random() * BUILDING_PALETTE.length)];
+
+  const tex = _makeWindowTexture();
+  tex.repeat.set(Math.max(1, Math.round(width / 3)), Math.max(1, Math.round(height / FLOOR_HEIGHT)));
+
+  const mat = new THREE.MeshStandardMaterial({
+    color,
+    map: tex,
+    emissive: 0xffdf8a,
+    emissiveMap: tex,
+    emissiveIntensity: 0.08,
+    transparent: false,
+    opacity: 1,
+  });
+
+  const g    = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), mat);
+  body.position.y = height / 2;
+  g.add(body);
+
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x22262c, transparent: false, opacity: 1 });
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(width * 0.9, 0.4, depth * 0.9), roofMat);
+  roof.position.y = height + 0.2;
+  g.add(roof);
+
+  const materials = [mat, roofMat];
+
+  if (Math.random() < 0.55) {
+    const antMat = new THREE.MeshStandardMaterial({ color: 0x888888, transparent: false, opacity: 1 });
+    const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 2 + Math.random() * 2, 6), antMat);
+    antenna.position.set((Math.random() - 0.5) * width * 0.4, height + 1.2, (Math.random() - 0.5) * depth * 0.4);
+    g.add(antenna);
+    materials.push(antMat);
+  }
+
+  g.position.set(x, 0, z);
+  g.userData._opacity = 1;
+
+  addBoxCollider(x, z, width / 2, depth / 2);
+  _buildingWindowMats.push(mat);
+  _buildingOccluders.push({
+    mesh: g,
+    materials,
+    radius: Math.max(width, depth) / 2,
+    height,
+    baseY: 0,
+  });
+
+  return g;
+}
+
+function _buildCityscape() {
+  // Fixed grid, inside the road loop, in the park's east half where no
+  // business plots sit. Height is driven by floor count (avatar-scaled),
+  // footprint is bigger too, gaps between cells stay tight walkable alleys.
+  const cols = [55, 71];
+  const rows = [-44, -28, -12, 12, 28, 44];
+  const minFloors = 6, maxFloors = 14;
+
+  cols.forEach(cx => {
+    rows.forEach(cz => {
+      scene.add(makeCityBuilding(cx, cz, 14, 14, minFloors * FLOOR_HEIGHT, maxFloors * FLOOR_HEIGHT));
+    });
+  });
 }
 
 function makeBegTarget(actionId, x, z) {
@@ -857,7 +1040,7 @@ function makeBusinessMesh(bizId, x, z) {
 
 // ── Road builders ──────────────────────────────────────────────
 function buildWestRoad() {
-  const road = new THREE.Mesh(new THREE.PlaneGeometry(12, 130),
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(14, 130),
     new THREE.MeshStandardMaterial({ color: 0x37474f }));
   road.rotation.x = -Math.PI/2; road.position.y = 0.01;
   scene.add(road);
@@ -869,7 +1052,7 @@ function buildWestRoad() {
     scene.add(sw);
   });
 
-  const leftLane = new THREE.Mesh(new THREE.PlaneGeometry(8, 130),
+  const leftLane = new THREE.Mesh(new THREE.PlaneGeometry(10, 130),
     new THREE.MeshStandardMaterial({ color: 0x455a64 }));
   leftLane.rotation.x = -Math.PI/2; leftLane.position.set(-17, 0.015, 0);
   scene.add(leftLane);
@@ -934,7 +1117,7 @@ function buildSouthRoad() {
 
 function buildEastRoad() {
   const len = LOOP_Z * 2;
-  const road = new THREE.Mesh(new THREE.PlaneGeometry(12, len),
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(14, len),
     new THREE.MeshStandardMaterial({ color: 0x37474f }));
   road.rotation.x = -Math.PI/2; road.position.set(LOOP_X, 0.01, 0);
   scene.add(road);
@@ -944,7 +1127,7 @@ function buildEastRoad() {
     sw.rotation.x = -Math.PI/2; sw.position.set(LOOP_X + s * 8.5, 0.02, 0);
     scene.add(sw);
   });
-  const outerLane = new THREE.Mesh(new THREE.PlaneGeometry(8, len),
+  const outerLane = new THREE.Mesh(new THREE.PlaneGeometry(10, len),
     new THREE.MeshStandardMaterial({ color: 0x455a64 }));
   outerLane.rotation.x = -Math.PI/2; outerLane.position.set(LOOP_X + 17, 0.015, 0);
   scene.add(outerLane);
@@ -974,8 +1157,8 @@ function buildPark() {
   scene.add(pathV);
   scene.add(makeFountain(LOOP_X / 2, 0));
   const parkTrees = [
-    [20, -40],[20, 40],[70, -40],[70, 40],
-    [20, -10],[20, 10],[70, -10],[70, 10],
+    [20, -40],[20, 40],
+    [20, -10],[20, 10],
     [45, -45],[45, 45],
   ];
   parkTrees.forEach(([x, z]) => scene.add(makeTree(x, z)));
@@ -984,12 +1167,73 @@ function buildPark() {
   scene.add(makeBench(LOOP_X / 2,      5, Math.PI/2));
 }
 
+const ROUNDABOUT_RADIUS = 19;
+const ROUNDABOUT_ISLAND = 6;
+const ROUNDABOUT_CENTERS = [[0, LOOP_Z], [LOOP_X, LOOP_Z], [LOOP_X, -LOOP_Z], [0, -LOOP_Z]];
+
+function makeRoundabout(x, z) {
+  const g = new THREE.Group();
+
+  // Paved plaza covering the full intersection footprint
+  const plaza = new THREE.Mesh(new THREE.CircleGeometry(ROUNDABOUT_RADIUS, 32),
+    new THREE.MeshStandardMaterial({ color: 0x37474f }));
+  plaza.rotation.x = -Math.PI / 2; plaza.position.y = 0.012;
+  g.add(plaza);
+
+  // Lane-divider ring around the island
+  const ring = new THREE.Mesh(new THREE.RingGeometry(ROUNDABOUT_ISLAND + 0.15, ROUNDABOUT_ISLAND + 0.55, 32),
+    new THREE.MeshStandardMaterial({ color: 0xe8eaed }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.018;
+  g.add(ring);
+
+  // Raised curb + grass island
+  const curb = new THREE.Mesh(new THREE.CylinderGeometry(ROUNDABOUT_ISLAND, ROUNDABOUT_ISLAND, 0.22, 24),
+    new THREE.MeshStandardMaterial({ color: 0xb0bec5 }));
+  curb.position.y = 0.11;
+  g.add(curb);
+  const island = new THREE.Mesh(new THREE.CylinderGeometry(ROUNDABOUT_ISLAND - 0.4, ROUNDABOUT_ISLAND - 0.4, 0.08, 24),
+    new THREE.MeshStandardMaterial({ color: 0x388e3c }));
+  island.position.y = 0.26;
+  g.add(island);
+
+  const bush = new THREE.Mesh(new THREE.SphereGeometry(1.1, 8, 6),
+    new THREE.MeshStandardMaterial({ color: 0x2e7d32 }));
+  bush.position.set(x - 2.4, 1.15, z + 2.4);
+  scene.add(bush);
+
+  scene.add(makeTree(x + 0.9, z - 0.6));
+  scene.add(makeStreetLight(x, z + ROUNDABOUT_ISLAND - 1.2));
+
+  g.position.set(x, 0, z);
+  addSteppableCollider(x, z, ROUNDABOUT_ISLAND, ROUNDABOUT_ISLAND);
+  return g;
+}
+
 function buildCorners() {
-  const cMat = new THREE.MeshStandardMaterial({ color: 0x455a64 });
-  [[0, LOOP_Z], [LOOP_X, LOOP_Z], [LOOP_X, -LOOP_Z], [0, -LOOP_Z]].forEach(([x, z]) => {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), cMat);
-    m.rotation.x = -Math.PI/2; m.position.set(x, 0.012, z);
-    scene.add(m);
+  ROUNDABOUT_CENTERS.forEach(([x, z]) => scene.add(makeRoundabout(x, z)));
+}
+
+function buildCrosswalks() {
+  const stripeMat = new THREE.MeshStandardMaterial({ color: 0xe8eaed });
+  CROSSWALK_ZONES.forEach(cw => {
+    const stripeCount = 5;
+    if (cw.dir === 'z') {
+      const stripeW = cw.w / (stripeCount * 2 - 1);
+      for (let i = 0; i < stripeCount; i++) {
+        const sx = cw.cx - cw.w / 2 + stripeW * (2 * i + 0.5);
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(stripeW, cw.h * 0.8), stripeMat);
+        m.rotation.x = -Math.PI / 2; m.position.set(sx, 0.022, cw.cz);
+        scene.add(m);
+      }
+    } else {
+      const stripeH = cw.h / (stripeCount * 2 - 1);
+      for (let i = 0; i < stripeCount; i++) {
+        const sz = cw.cz - cw.h / 2 + stripeH * (2 * i + 0.5);
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(cw.w * 0.8, stripeH), stripeMat);
+        m.rotation.x = -Math.PI / 2; m.position.set(cw.cx, 0.022, sz);
+        scene.add(m);
+      }
+    }
   });
 }
 
@@ -1011,22 +1255,106 @@ function _buildBlock(ox, oz) {
   buildEastRoad();
   buildPark();
   buildCorners();
+  buildCrosswalks();
+  _buildCityscape();
 
   scene.add      = realAdd;
   addBoxCollider = realCollider;
 }
 
+// Connects every pair of adjacent quadrants (2x2 map) so there are no
+// dead / disconnected seams between blocks.
 function _buildQuadConnectors() {
   const mat = new THREE.MeshStandardMaterial({ color: 0x455a64 });
-  const westBridge = new THREE.Mesh(new THREE.PlaneGeometry(BLOCK_W - LOOP_X + 20, 10), mat);
-  westBridge.rotation.x = -Math.PI / 2;
-  westBridge.position.set(-(LOOP_X + (BLOCK_W - LOOP_X) / 2), 0.015, 0);
-  scene.add(westBridge);
+  QUAD_CONNECTORS.forEach(c => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(c.w, c.h), mat);
+    m.rotation.x = -Math.PI / 2;
+    m.position.set(c.cx, 0.015, c.cz);
+    scene.add(m);
+  });
+}
 
-  const southBridge = new THREE.Mesh(new THREE.PlaneGeometry(10, BLOCK_H - LOOP_Z * 2 + 20), mat);
-  southBridge.rotation.x = -Math.PI / 2;
-  southBridge.position.set(LOOP_X / 2, 0.015, -(LOOP_Z + (BLOCK_H - LOOP_Z * 2) / 2));
-  scene.add(southBridge);
+// ── Central Hub Park ─────────────────────────────────────────────
+// The single point where all 4 quadrants' nearest corners converge.
+// Built once, in absolute world space (not tiled per-quadrant).
+const HUB_CENTER = { x: -20, z: -80 };
+const HUB_PLAZA_RADIUS  = 26;
+const HUB_PARK_RADIUS   = 11;
+
+function buildCentralHubPark() {
+  const hx = HUB_CENTER.x, hz = HUB_CENTER.z;
+
+  // Paved hub plaza — overlaps all 4 corner roundabouts so every quadrant
+  // road connects through cleanly with no gaps.
+  const plaza = new THREE.Mesh(new THREE.CircleGeometry(HUB_PLAZA_RADIUS, 40),
+    new THREE.MeshStandardMaterial({ color: 0x37474f }));
+  plaza.rotation.x = -Math.PI / 2; plaza.position.set(hx, 0.011, hz);
+  scene.add(plaza);
+
+  // Divider ring around the park island
+  const ring = new THREE.Mesh(new THREE.RingGeometry(HUB_PARK_RADIUS + 0.2, HUB_PARK_RADIUS + 0.7, 40),
+    new THREE.MeshStandardMaterial({ color: 0xe8eaed }));
+  ring.rotation.x = -Math.PI / 2; ring.position.set(hx, 0.018, hz);
+  scene.add(ring);
+
+  // Raised curb
+  const curb = new THREE.Mesh(new THREE.CylinderGeometry(HUB_PARK_RADIUS, HUB_PARK_RADIUS, 0.22, 32),
+    new THREE.MeshStandardMaterial({ color: 0xb0bec5 }));
+  curb.position.set(hx, 0.11, hz);
+  scene.add(curb);
+
+  // Small park: grass island, cross paths, fountain, trees, benches
+  const grassIsland = new THREE.Mesh(new THREE.CylinderGeometry(HUB_PARK_RADIUS - 0.4, HUB_PARK_RADIUS - 0.4, 0.08, 32),
+    new THREE.MeshStandardMaterial({ color: 0x388e3c }));
+  grassIsland.position.set(hx, 0.26, hz);
+  scene.add(grassIsland);
+
+  const pathMat = new THREE.MeshStandardMaterial({ color: 0x8d9ea8 });
+  const pathA = new THREE.Mesh(new THREE.PlaneGeometry((HUB_PARK_RADIUS - 0.4) * 2, 2.4), pathMat);
+  pathA.rotation.x = -Math.PI / 2; pathA.position.set(hx, 0.30, hz);
+  scene.add(pathA);
+  const pathB = new THREE.Mesh(new THREE.PlaneGeometry(2.4, (HUB_PARK_RADIUS - 0.4) * 2), pathMat);
+  pathB.rotation.x = -Math.PI / 2; pathB.position.set(hx, 0.30, hz);
+  scene.add(pathB);
+
+  scene.add(makeFountain(hx, hz));
+
+  [[-6, -6], [6, -6], [-6, 6], [6, 6]].forEach(([dx, dz]) => scene.add(makeTree(hx + dx, hz + dz)));
+  scene.add(makeBench(hx - 3.5, hz + 2, Math.PI / 2));
+  scene.add(makeBench(hx + 3.5, hz - 2, -Math.PI / 2));
+
+  addSteppableCollider(hx, hz, HUB_PARK_RADIUS, HUB_PARK_RADIUS);
+}
+
+// ── World Border Wall ────────────────────────────────────────
+const WORLD_MIN_X = -(BLOCK_W + 8);
+const WORLD_MAX_X = LOOP_X + 8;
+const WORLD_MIN_Z = -(BLOCK_H + LOOP_Z + 8);
+const WORLD_MAX_Z = LOOP_Z + 8;
+const BORDER_HEIGHT = 1.6;
+const BORDER_THICK  = 1.0;
+
+function _buildBorderSegment(cx, cz, w, d) {
+  const mat = new THREE.MeshStandardMaterial({ color: 0x2a2f36 });
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(w, BORDER_HEIGHT, d), mat);
+  wall.position.set(cx, BORDER_HEIGHT / 2, cz);
+  scene.add(wall);
+  const capMat = new THREE.MeshStandardMaterial({ color: 0xf0a500, emissive: 0xf0a500, emissiveIntensity: 0.25 });
+  const cap = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, d), capMat);
+  cap.position.set(cx, BORDER_HEIGHT + 0.06, cz);
+  scene.add(cap);
+  addBoxCollider(cx, cz, w / 2, d / 2);
+}
+
+function buildWorldBorder() {
+  const fullW = WORLD_MAX_X - WORLD_MIN_X;
+  const fullD = WORLD_MAX_Z - WORLD_MIN_Z;
+  const cx    = (WORLD_MIN_X + WORLD_MAX_X) / 2;
+  const cz    = (WORLD_MIN_Z + WORLD_MAX_Z) / 2;
+  _buildBorderSegment(cx, WORLD_MIN_Z - BORDER_THICK / 2, fullW + BORDER_THICK * 2, BORDER_THICK);
+  _buildBorderSegment(cx, WORLD_MAX_Z + BORDER_THICK / 2, fullW + BORDER_THICK * 2, BORDER_THICK);
+  _buildBorderSegment(WORLD_MIN_X - BORDER_THICK / 2, cz, BORDER_THICK, fullD + BORDER_THICK * 2);
+  _buildBorderSegment(WORLD_MAX_X + BORDER_THICK / 2, cz, BORDER_THICK, fullD + BORDER_THICK * 2);
 }
 
 function buildEnvironment() {
@@ -1038,6 +1366,8 @@ function buildEnvironment() {
 
   QUAD_OFFSETS.forEach(q => _buildBlock(q.x, q.z));
   _buildQuadConnectors();
+  buildCentralHubPark();
+  buildWorldBorder();
 
   const cp = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 0.1, 12),
     new THREE.MeshStandardMaterial({ color: 0xf0a500 }));
@@ -1187,9 +1517,9 @@ class Player extends Avatar {
       this.state = 'idle';
     }
 
-    this.group.position.x = Math.min(LOOP_X + 8, Math.max(-(BLOCK_W + 8), this.group.position.x));
-    this.group.position.z = Math.min(LOOP_Z + 8, Math.max(-(BLOCK_H + LOOP_Z + 8), this.group.position.z));
-    resolveCollisions(this.group.position, PLAYER_RADIUS, this._id);
+    this.group.position.x = Math.min(WORLD_MAX_X - 1, Math.max(WORLD_MIN_X + 1, this.group.position.x));
+    this.group.position.z = Math.min(WORLD_MAX_Z - 1, Math.max(WORLD_MIN_Z + 1, this.group.position.z));
+    resolveCollisions(this.group.position, PLAYER_RADIUS, this._id, { grounded: this.grounded, onTop: this.baseY > 0.05 });
 
     if (!this.grounded || this.vy !== 0) {
       this.vy    -= 14 * dt;
@@ -1223,13 +1553,22 @@ class WorkerNPC extends Avatar {
     this._anim.setState(WorkerAnimStates.WALK);
     this._dynRef = { pos: this.group.position, radius: ENTITY_RADIUS, id: this._id };
     registerDynamic(this._dynRef);
+    this._stuckTimer = 0;
+    this._lastCheckPos = { x: this.group.position.x, z: this.group.position.z };
     this._requestPath(this._task.x, this._task.z);
   }
   _newTask() {
-    return {
-      x: this.home.x + (Math.random() * 6 - 3),
-      z: this.home.z + (Math.random() * 6 - 3),
-    };
+    const spot = _randomFreeSpot(this.home.x - 4, this.home.x + 4, this.home.z - 4, this.home.z + 4);
+    return spot || { x: this.home.x, z: this.home.z };
+  }
+  _checkStuck(dt) {
+    this._stuckTimer += dt;
+    if (this._stuckTimer < STUCK_CHECK_INTERVAL) return false;
+    const p = this.group.position;
+    const moved = Math.hypot(p.x - this._lastCheckPos.x, p.z - this._lastCheckPos.z);
+    this._stuckTimer = 0;
+    this._lastCheckPos = { x: p.x, z: p.z };
+    return moved < STUCK_MIN_MOVE;
   }
   _requestPath(tx, tz) {
     const p = this.group.position;
@@ -1267,6 +1606,7 @@ class WorkerNPC extends Avatar {
           this._anim.setState(WorkerAnimStates.WALK);
           resolveStaticCollisions(p, ENTITY_RADIUS);
           resolveDynamicCollisions(p, ENTITY_RADIUS, this._id);
+          if (this._checkStuck(dt)) this._requestPath(target.x, target.z);
         }
       } else {
         const dx   = target.x - p.x, dz = target.z - p.z;
@@ -1296,6 +1636,7 @@ class WorkerNPC extends Avatar {
           this.state = 'walk';
           resolveStaticCollisions(p, ENTITY_RADIUS);
           resolveDynamicCollisions(p, ENTITY_RADIUS, this._id);
+          if (this._checkStuck(dt)) this._requestPath(target.x, target.z);
         }
       }
     } else {
@@ -1373,7 +1714,18 @@ class CustomerNPC extends Avatar {
     this._dynRef = { pos: this.group.position, radius: ENTITY_RADIUS, id: this._id };
     registerDynamic(this._dynRef);
     this._path = []; this._wpIdx = 0; this._repathTimer = 0;
+    this._stuckTimer = 0;
+    this._lastCheckPos = { x: spawnPos.x, z: spawnPos.z };
     this._requestPath(businessPos.x, businessPos.z);
+  }
+  _checkStuck(dt) {
+    this._stuckTimer += dt;
+    if (this._stuckTimer < STUCK_CHECK_INTERVAL) return false;
+    const p = this.group.position;
+    const moved = Math.hypot(p.x - this._lastCheckPos.x, p.z - this._lastCheckPos.z);
+    this._stuckTimer = 0;
+    this._lastCheckPos = { x: p.x, z: p.z };
+    return moved < STUCK_MIN_MOVE;
   }
   _requestPath(tx, tz) {
     const p = this.group.position;
@@ -1408,6 +1760,7 @@ class CustomerNPC extends Avatar {
         this.facePoint(goX, goZ); this.state = 'walk';
         resolveStaticCollisions(p, ENTITY_RADIUS);
         resolveDynamicCollisions(p, ENTITY_RADIUS, this._id);
+        if (this._checkStuck(dt)) this._requestPath(target.x, target.z);
       }
     } else {
       this.timer -= dt;
@@ -1439,6 +1792,18 @@ class PedestrianNPC extends Avatar {
     this._requestPath();
     this._dynRef = { pos: this.group.position, radius: ENTITY_RADIUS * 0.7, id: this._id };
     registerDynamic(this._dynRef);
+    this._stuckTimer = 0;
+    this._lastCheckPos = { x: spawn.x, z: spawn.z };
+  }
+
+  _checkStuck(dt) {
+    this._stuckTimer += dt;
+    if (this._stuckTimer < STUCK_CHECK_INTERVAL) return false;
+    const p = this.group.position;
+    const moved = Math.hypot(p.x - this._lastCheckPos.x, p.z - this._lastCheckPos.z);
+    this._stuckTimer = 0;
+    this._lastCheckPos = { x: p.x, z: p.z };
+    return moved < STUCK_MIN_MOVE;
   }
 
   _requestPath() {
@@ -1485,6 +1850,7 @@ class PedestrianNPC extends Avatar {
         this.state = 'walk';
         resolveStaticCollisions(p, ENTITY_RADIUS * 0.7);
         resolveDynamicCollisions(p, ENTITY_RADIUS * 0.7, this._id);
+        if (this._checkStuck(dt)) { this._goal = _randomPedestrianGoal(); this._requestPath(); }
       }
     } else {
       // Reached goal — idle briefly, then pick new goal
@@ -1889,6 +2255,40 @@ function onResize() {
 // ── Pedestrian batch update — throttled to every 2nd frame ────
 let _pedFrameSkip = 0;
 
+// ── Building Occlusion (fade, not hide, when blocking the view) ─
+function _updateBuildingOcclusion() {
+  if (!player || !camera) return;
+  const px = player.group.position.x, pz = player.group.position.z, py = player.group.position.y + 1;
+  const dx = camera.position.x - px, dz = camera.position.z - pz, dy = camera.position.y - py;
+  const lenXZSq = dx * dx + dz * dz;
+  if (lenXZSq < 0.0001) return;
+
+  for (const b of _buildingOccluders) {
+    if (!b.mesh.visible) continue;
+    const bx = b.mesh.position.x - px, bz = b.mesh.position.z - pz;
+    const t  = (bx * dx + bz * dz) / lenXZSq;
+
+    let occluding = false;
+    if (t > 0.04 && t < 0.97) {
+      const perpX = bx - dx * t, perpZ = bz - dz * t;
+      const perpDist = Math.hypot(perpX, perpZ);
+      if (perpDist < b.radius + 1.4) {
+        const sightY = py + dy * t;
+        if (sightY >= b.baseY - 0.5 && sightY <= b.baseY + b.height + 0.5) occluding = true;
+      }
+    }
+
+    const target = occluding ? 0.16 : 1;
+    b.mesh.userData._opacity = THREE.MathUtils.lerp(b.mesh.userData._opacity, target, 0.18);
+    const op = b.mesh.userData._opacity;
+    for (const m of b.materials) {
+      m.opacity      = op;
+      m.transparent  = op < 0.995;
+      m.depthWrite   = op > 0.5;
+    }
+  }
+}
+
 // ── Main loop ──────────────────────────────────────────────────
 function loop() {
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -1907,6 +2307,7 @@ function loop() {
 
   _updateStaticCulling();
   _updateEntityCulling();
+  _updateBuildingOcclusion();
 
   if (!_paused) {
     Object.values(workerNPCs).forEach(list => list.forEach(w => w.update(dt)));
