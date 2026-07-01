@@ -32,6 +32,12 @@ function playPurchase()    { _beep(440,  0.18, 'sawtooth', 0.14, 660); }
 function playUpgrade()     { _beep(523,  0.25, 'triangle', 0.16, 1046); }
 function playTaskComplete(){ _beep(660,  0.10, 'sine',     0.12, 880); }
 
+function playDumpAll() {
+  for (let i = 0; i < 10; i++) {
+    setTimeout(() => _beep(1200, 0.12, 'square', 0.14, 1800), i * 55);
+  }
+}
+
 // ── Background Music Manager ──────────────────────────────────
 // Future asset: assets/audio/music/main_theme.mp3
 // Replace by dropping the file — no code changes needed.

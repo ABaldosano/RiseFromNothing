@@ -486,6 +486,20 @@ body::before {
   background: rgba(240,165,0,0.07);
 }
 
+.job-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.job-tab-icon {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  flex-shrink: 0;
+  margin: -6px -2px;
+}
+
 /* ── Action Buttons ── */
 .actions-grid {
   display: flex;
@@ -604,12 +618,13 @@ body::before {
 .unlock-left {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 4px;
   flex: 1;
   min-width: 0;
 }
 
 .unlock-emoji { font-size: 24px; flex-shrink: 0; line-height: 1; margin-top: 2px; }
+.unlock-icon-img { width: 70px; height: 70px; object-fit: contain; margin: -8px 0; }
 .unlock-info  { flex: 1; min-width: 0; }
 
 .unlock-name {
@@ -723,10 +738,11 @@ body::before {
 .business-header {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 6px;
 }
 
 .business-emoji { font-size: 28px; line-height: 1; flex-shrink: 0; }
+.business-icon-img { width: 84px; height: 84px; object-fit: contain; margin: -8px 0; }
 .business-info  { flex: 1; min-width: 0; }
 
 .business-name {

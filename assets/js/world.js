@@ -18,6 +18,10 @@ const BIZ_COLORS = {
   motorcycle_courier: 0xef5350,
   delivery_van:       0x66bb6a,
   logistics_company:  0xffa726,
+  boarding_house:     0x8d6e63,
+  apartment:          0x5c6bc0,
+  commercial_unit:    0x26a69a,
+  office_building:    0x78909c,
 };
 
 const VEHICLE_COLORS = {
@@ -26,6 +30,16 @@ const VEHICLE_COLORS = {
   van:        [0x66bb6a, 0x43a047, 0x1b5e20],
   truck:      [0xffa726, 0xfb8c00, 0xe65100],
 };
+
+// ── Quadrant tiling (2x2 grid = 4x map) ─────────────────────────
+const BLOCK_W = 130; // LOOP_X(90) + 40 gap
+const BLOCK_H = 160; // LOOP_Z*2(120) + 40 gap
+const QUAD_OFFSETS = [
+  { x: 0,        z: 0        }, // Q00 — home quadrant (businesses, spawn, park systems)
+  { x: -BLOCK_W, z: 0        }, // west expansion
+  { x: 0,        z: -BLOCK_H }, // south expansion
+  { x: -BLOCK_W, z: -BLOCK_H }, // both
+];
 
 const BUSINESS_POS = {
   food_cart:          { x: 14, z: -36 },
@@ -36,6 +50,10 @@ const BUSINESS_POS = {
   motorcycle_courier: { x:-14, z: -14 },
   delivery_van:       { x:-14, z:  12 },
   logistics_company:  { x:-14, z:  36 },
+  boarding_house:     { x: BLOCK_W - 14, z: -36 },
+  apartment:          { x: BLOCK_W - 14, z: -14 },
+  commercial_unit:    { x: BLOCK_W - 14, z:  12 },
+  office_building:    { x: BLOCK_W - 14, z:  36 },
 };
 
 const COLLECTION_POINT = { x: 0, z: 46 };
@@ -47,7 +65,7 @@ const CUSTOMER_END     = { x: 14, z:  56 };
 const BEG_INTERACT_RADIUS = 2.4;
 const BEG_COOLDOWN        = 15;
 const BEG_GLOBAL_COOLDOWN = 0.6;
-const BEG_TARGET_COUNT    = 18;
+const BEG_TARGET_COUNT    = 72;
 const BEG_MIN_SPACING     = 6;
 const BEG_ACTION_TYPES    = ['collect_bottles', 'collect_scrap']; // ask_change handled by walking NPCs
 
@@ -61,7 +79,7 @@ const SWEEP_ZONES = {
 };
 
 // ── Pedestrian system ─────────────────────────────────────────
-const PEDESTRIAN_COUNT      = 40;
+const PEDESTRIAN_COUNT      = 100;
 const PEDESTRIAN_SPEED      = 1.6;
 const PEDESTRIAN_REPATH     = 8.0;
 const PEDESTRIAN_IDLE_TIME  = 2.5;
@@ -88,6 +106,11 @@ const PEDESTRIAN_ZONES = [
   { xMin:  20, xMax:  43, zMin:   4, zMax:  52 },
   { xMin:  47, xMax:  70, zMin:   4, zMax:  52 },
 ];
+
+// Same zones repeated across all 4 quadrants of the tiled map
+const ALL_PEDESTRIAN_ZONES = QUAD_OFFSETS.flatMap(q =>
+  PEDESTRIAN_ZONES.map(z => ({ xMin: z.xMin + q.x, xMax: z.xMax + q.x, zMin: z.zMin + q.z, zMax: z.zMax + q.z }))
+);
 
 // ── Isometric Camera ───────────────────────────────────────────
 const ISO_YAW   = Math.PI / 4;
@@ -196,6 +219,38 @@ const _staticColliders = [];
 const PLAYER_RADIUS    = 0.42;
 const ENTITY_RADIUS    = 0.38;
 
+// ── Static distance culling (perf optimization for 4x map) ─────
+// Three.js already frustum-culls every Mesh by default; this adds
+// a distance cutoff so far-quadrant decorative props skip rendering
+// entirely, cutting draw calls when the player is on the other side
+// of the map.
+const _staticCullables = [];
+const CULL_DIST_SQ = 100 * 100;
+let _cullFrame = 0;
+function _updateStaticCulling() {
+  _cullFrame = (_cullFrame + 1) % 4;
+  if (_cullFrame !== 0 || !player) return;
+  const px = player.group.position.x, pz = player.group.position.z;
+  for (const obj of _staticCullables) {
+    const dx = obj.position.x - px, dz = obj.position.z - pz;
+    obj.visible = (dx * dx + dz * dz) <= CULL_DIST_SQ;
+  }
+}
+
+function _updateEntityCulling() {
+  if (!player) return;
+  const px = player.group.position.x, pz = player.group.position.z;
+  const cullGroup = (grp) => {
+    if (!grp) return;
+    const dx = grp.position.x - px, dz = grp.position.z - pz;
+    grp.visible = (dx * dx + dz * dz) <= CULL_DIST_SQ;
+  };
+  Object.values(workerNPCs).forEach(list => list.forEach(w => cullGroup(w.group)));
+  Object.values(vehicleNPCs).forEach(list => list.forEach(v => cullGroup(v.group)));
+  customerNPCs.forEach(c => cullGroup(c.group));
+  pedestrianNPCs.forEach(p => cullGroup(p.group));
+}
+
 function addBoxCollider(cx, cz, hw, hd) {
   _staticColliders.push({ minX: cx - hw, maxX: cx + hw, minZ: cz - hd, maxZ: cz + hd });
 }
@@ -253,9 +308,9 @@ function resolveCollisions(pos, radius, selfId) {
 
 // ── Pathfinding (grid-based A*) ───────────────────────────────
 const PF_CELL   = 2.0;
-const PF_ORIGIN = { x: -10, z: -70 };
-const PF_COLS   = 60;
-const PF_ROWS   = 70;
+const PF_ORIGIN = { x: -155, z: -235 };
+const PF_COLS   = 140;
+const PF_ROWS   = 170;
 
 let _pfGrid = null;
 
@@ -422,7 +477,7 @@ function _randomFreeSpot(xMin, xMax, zMin, zMax) {
 
 // Pick a random goal from pedestrian walkable zones
 function _randomPedestrianGoal() {
-  const zone = PEDESTRIAN_ZONES[Math.floor(Math.random() * PEDESTRIAN_ZONES.length)];
+  const zone = ALL_PEDESTRIAN_ZONES[Math.floor(Math.random() * ALL_PEDESTRIAN_ZONES.length)];
   for (let i = 0; i < 20; i++) {
     const x = zone.xMin + Math.random() * (zone.xMax - zone.xMin);
     const z = zone.zMin + Math.random() * (zone.zMax - zone.zMin);
@@ -709,6 +764,23 @@ function makeBusinessMesh(bizId, x, z) {
     g.add(platform, building, lane);
     mesh = building;
     addBoxCollider(x, z, 3.4, 2.8);
+  } else if (biz?.category === 'property') {
+    const parking = new THREE.Mesh(new THREE.PlaneGeometry(7, 6),
+      new THREE.MeshStandardMaterial({ color: 0x37474f }));
+    parking.rotation.x = -Math.PI / 2; parking.position.y = 0.08;
+    const height = biz.propertyType === 'office' ? 6 : biz.propertyType === 'apartment' ? 4.5 : 3;
+    const building = new THREE.Mesh(new THREE.BoxGeometry(4, height, 4),
+      new THREE.MeshStandardMaterial({ color, transparent: true }));
+    building.position.set(-1, height / 2, 0);
+    const signPole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.6, 6),
+      new THREE.MeshStandardMaterial({ color: 0x333333 }));
+    signPole.position.set(2.2, 0.8, 1.8);
+    const signBoard = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.6, 0.08),
+      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.15 }));
+    signBoard.position.set(2.2, 1.7, 1.8);
+    g.add(parking, building, signPole, signBoard);
+    mesh = building;
+    addBoxCollider(x, z, 3.6, 3.0);
   } else {
     switch (bizId) {
       case 'food_cart':
@@ -887,12 +959,17 @@ function buildCorners() {
   });
 }
 
-function buildEnvironment() {
-  const grass = new THREE.Mesh(new THREE.PlaneGeometry(300, 300),
-    new THREE.MeshStandardMaterial({ color: 0x2e7d32 }));
-  grass.rotation.x = -Math.PI/2;
-  grass.position.set(LOOP_X / 2, 0, 0);
-  scene.add(grass);
+function _buildBlock(ox, oz) {
+  // Offset-inject every mesh/collider added by the shared builder
+  // functions so one set of builders can stamp out N map copies.
+  const realAdd      = scene.add.bind(scene);
+  const realCollider = addBoxCollider;
+  scene.add = (obj) => {
+    if (obj.position) { obj.position.x += ox; obj.position.z += oz; }
+    _staticCullables.push(obj);
+    realAdd(obj);
+  };
+  addBoxCollider = (cx, cz, hw, hd) => realCollider(cx + ox, cz + oz, hw, hd);
 
   buildWestRoad();
   buildNorthRoad();
@@ -900,6 +977,33 @@ function buildEnvironment() {
   buildEastRoad();
   buildPark();
   buildCorners();
+
+  scene.add      = realAdd;
+  addBoxCollider = realCollider;
+}
+
+function _buildQuadConnectors() {
+  const mat = new THREE.MeshStandardMaterial({ color: 0x455a64 });
+  const westBridge = new THREE.Mesh(new THREE.PlaneGeometry(BLOCK_W - LOOP_X + 20, 10), mat);
+  westBridge.rotation.x = -Math.PI / 2;
+  westBridge.position.set(-(LOOP_X + (BLOCK_W - LOOP_X) / 2), 0.015, 0);
+  scene.add(westBridge);
+
+  const southBridge = new THREE.Mesh(new THREE.PlaneGeometry(10, BLOCK_H - LOOP_Z * 2 + 20), mat);
+  southBridge.rotation.x = -Math.PI / 2;
+  southBridge.position.set(LOOP_X / 2, 0.015, -(LOOP_Z + (BLOCK_H - LOOP_Z * 2) / 2));
+  scene.add(southBridge);
+}
+
+function buildEnvironment() {
+  const grass = new THREE.Mesh(new THREE.PlaneGeometry(520, 520),
+    new THREE.MeshStandardMaterial({ color: 0x2e7d32 }));
+  grass.rotation.x = -Math.PI/2;
+  grass.position.set(-BLOCK_W / 2 + LOOP_X / 2, 0, -BLOCK_H / 2);
+  scene.add(grass);
+
+  QUAD_OFFSETS.forEach(q => _buildBlock(q.x, q.z));
+  _buildQuadConnectors();
 
   const cp = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 0.1, 12),
     new THREE.MeshStandardMaterial({ color: 0xf0a500 }));
@@ -1049,8 +1153,8 @@ class Player extends Avatar {
       this.state = 'idle';
     }
 
-    this.group.position.x = Math.min(LOOP_X + 8, Math.max(-8, this.group.position.x));
-    this.group.position.z = Math.min(LOOP_Z + 8, Math.max(-(LOOP_Z + 8), this.group.position.z));
+    this.group.position.x = Math.min(LOOP_X + 8, Math.max(-(BLOCK_W + 8), this.group.position.x));
+    this.group.position.z = Math.min(LOOP_Z + 8, Math.max(-(BLOCK_H + LOOP_Z + 8), this.group.position.z));
     resolveCollisions(this.group.position, PLAYER_RADIUS, this._id);
 
     if (!this.grounded || this.vy !== 0) {
@@ -1156,6 +1260,8 @@ class WorkerNPC extends Avatar {
           p.z += dz / dist * 2.2 * dt;
           this.facePoint(target.x, target.z);
           this.state = 'walk';
+          resolveStaticCollisions(p, ENTITY_RADIUS);
+          resolveDynamicCollisions(p, ENTITY_RADIUS, this._id);
         }
       }
     } else {
@@ -1232,26 +1338,47 @@ class CustomerNPC extends Avatar {
     this._id     = 'c' + (++_entityCounter);
     this._dynRef = { pos: this.group.position, radius: ENTITY_RADIUS, id: this._id };
     registerDynamic(this._dynRef);
+    this._path = []; this._wpIdx = 0; this._repathTimer = 0;
+    this._requestPath(businessPos.x, businessPos.z);
+  }
+  _requestPath(tx, tz) {
+    const p = this.group.position;
+    const raw = _aStar(p.x, p.z, tx, tz);
+    this._path  = _smoothPath(raw, p.x, p.z) || [];
+    this._wpIdx = 0;
+    this._repathTimer = 0;
   }
   update(dt) {
     if (_paused) return;
     const p = this.group.position;
     if (this.phase === 'arriving' || this.phase === 'leaving') {
       const target = this.phase === 'arriving' ? this.target : this.despawn;
-      const dx = target.x - p.x, dz = target.z - p.z, dist = Math.hypot(dx, dz);
-      if (dist < 0.3) {
+      this._repathTimer += dt;
+      if (this._repathTimer >= 4 && this._wpIdx >= this._path.length) this._requestPath(target.x, target.z);
+
+      let goX = target.x, goZ = target.z, atFinal = true;
+      if (this._path.length > 0 && this._wpIdx < this._path.length) {
+        const wp = this._path[this._wpIdx];
+        goX = wp.x; goZ = wp.z; atFinal = false;
+      }
+      const dx = goX - p.x, dz = goZ - p.z, dist = Math.hypot(dx, dz);
+      if (!atFinal && dist < 0.4) {
+        this._wpIdx++;
+      } else if (atFinal && dist < 0.3) {
         if (this.phase === 'arriving') {
           this.phase = 'purchasing'; this.timer = 1; this.state = 'idle';
           if (typeof playPurchase === 'function') playPurchase();
         } else { this.dead = true; unregisterDynamic(this._dynRef); Footsteps.remove(this._id); }
       } else {
         p.x += dx / dist * 3 * dt; p.z += dz / dist * 3 * dt;
-        this.facePoint(target.x, target.z); this.state = 'walk';
+        this.facePoint(goX, goZ); this.state = 'walk';
         resolveStaticCollisions(p, ENTITY_RADIUS);
         resolveDynamicCollisions(p, ENTITY_RADIUS, this._id);
       }
     } else {
-      this.timer -= dt; if (this.timer <= 0) this.phase = 'leaving'; this.state = 'idle';
+      this.timer -= dt;
+      if (this.timer <= 0) { this.phase = 'leaving'; this._requestPath(this.despawn.x, this.despawn.z); }
+      this.state = 'idle';
     }
     Footsteps.tick(this._id, this.state, dt);
     this.updateBob(dt);
@@ -1276,7 +1403,8 @@ class PedestrianNPC extends Avatar {
     this._repathTimer = 0;
     this._speed      = PEDESTRIAN_SPEED * (0.8 + Math.random() * 0.4);
     this._requestPath();
-    // Do NOT register in dynamic collisions — pedestrians are lightweight
+    this._dynRef = { pos: this.group.position, radius: ENTITY_RADIUS * 0.7, id: this._id };
+    registerDynamic(this._dynRef);
   }
 
   _requestPath() {
@@ -1322,6 +1450,7 @@ class PedestrianNPC extends Avatar {
         this.facePoint(wp.x, wp.z);
         this.state = 'walk';
         resolveStaticCollisions(p, ENTITY_RADIUS * 0.7);
+        resolveDynamicCollisions(p, ENTITY_RADIUS * 0.7, this._id);
       }
     } else {
       // Reached goal — idle briefly, then pick new goal
@@ -1367,7 +1496,7 @@ function _buildBegTargets() {
   const maxAttempts = BEG_TARGET_COUNT * 30;
   while (placed < BEG_TARGET_COUNT && attempts < maxAttempts) {
     attempts++;
-    const spot = _randomFreeSpot(-8, LOOP_X + 8, -(LOOP_Z + 8), LOOP_Z + 8);
+    const spot = _randomFreeSpot(-(BLOCK_W + 8), LOOP_X + 8, -(BLOCK_H + LOOP_Z + 8), LOOP_Z + 8);
     if (!spot) continue;
 
     if (Math.hypot(spot.x - PLAYER_SPAWN.x, spot.z - PLAYER_SPAWN.z) < 4) continue;
@@ -1486,7 +1615,6 @@ function setupInput() {
     const k = e.key.toLowerCase();
     if (KEY_MAP[k]) keys[KEY_MAP[k]] = true;
     if (k === 'shift') inputState.run = true;
-    if (k === 'e' && typeof window.interactWithBusiness === 'function') window.interactWithBusiness();
     if (k === ' ') { e.preventDefault(); if (player && !_paused) player.jump(); }
     if (k === 'escape' || k === 'p') { if (typeof window.togglePause === 'function') window.togglePause(); }
   });
@@ -1743,6 +1871,9 @@ function loop() {
   camera.position.set(cx, cy, cz);
   camera.lookAt(player.group.position.x, player.group.position.y + 1, player.group.position.z);
 
+  _updateStaticCulling();
+  _updateEntityCulling();
+
   if (!_paused) {
     Object.values(workerNPCs).forEach(list => list.forEach(w => w.update(dt)));
     Object.values(vehicleNPCs).forEach(list => list.forEach(v => v.update(dt)));
@@ -1872,9 +2003,9 @@ function init(canvas, gState, businessesData, bizOrder) {
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0d0f11);
-  scene.fog        = new THREE.Fog(0x0d0f11, 70, 180);
+  scene.fog        = new THREE.Fog(0x0d0f11, 70, 220);
 
-  camera   = new THREE.PerspectiveCamera(55, canvas.clientWidth / canvas.clientHeight, 0.1, 300);
+  camera   = new THREE.PerspectiveCamera(55, canvas.clientWidth / canvas.clientHeight, 0.1, 420);
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
   renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);

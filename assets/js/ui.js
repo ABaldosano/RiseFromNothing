@@ -38,7 +38,9 @@ function _renderJobTabs() {
     const job = JOBS[jobId];
     const btn = document.createElement('button');
     btn.className   = 'job-tab' + (jobId === G.activeJob ? ' active' : '');
-    btn.textContent = job.emoji + ' ' + job.name;
+    btn.innerHTML   = (job.icon
+      ? `<img class="job-tab-icon" src="${job.icon}" alt="">`
+      : `<span>${job.emoji}</span>`) + ` ${job.name}`;
     btn.onclick     = () => switchJob(jobId);
     wrap.appendChild(btn);
   });
@@ -150,7 +152,9 @@ function renderUnlockSection() {
     card.className = 'unlock-card';
     card.innerHTML = `
       <div class="unlock-left">
-        <span class="unlock-emoji">${job.emoji}</span>
+        ${job.icon
+          ? `<img class="unlock-emoji unlock-icon-img" src="${job.icon}" alt="">`
+          : `<span class="unlock-emoji">${job.emoji}</span>`}
         <div class="unlock-info">
           <div class="unlock-name">${job.name}</div>
           <div class="unlock-desc">${job.description}</div>
@@ -177,12 +181,16 @@ function renderBusinessSection() {
   // Category headers
   const retailBizIds    = BIZ_ORDER.filter(id => BUSINESSES[id].category === 'retail');
   const transportBizIds = BIZ_ORDER.filter(id => BUSINESSES[id].category === 'transport');
+  const propertyBizIds  = BIZ_ORDER.filter(id => BUSINESSES[id].category === 'property');
 
   _renderCategoryHeader(grid, '🏪 RETAIL');
   retailBizIds.forEach(bizId => _renderBizCard(grid, bizId));
 
   _renderCategoryHeader(grid, '🚚 TRANSPORTATION');
   transportBizIds.forEach(bizId => _renderBizCard(grid, bizId));
+
+  _renderCategoryHeader(grid, '🏠 REAL ESTATE');
+  propertyBizIds.forEach(bizId => _renderBizCard(grid, bizId));
 }
 
 function _renderCategoryHeader(container, label) {
@@ -243,8 +251,9 @@ function _renderBizCard(container, bizId) {
         </div>`;
     }
 
-    // Driver label (transport = drivers, retail = workers)
-    const workerLabel = isTransport ? '🚴 Drivers' : '👷 Workers';
+    // Driver/tenant label (transport = drivers, property = tenants, retail = workers)
+    const isProperty   = biz.category === 'property';
+    const workerLabel  = isTransport ? '🚴 Drivers' : (isProperty ? '🏠 Tenants' : '👷 Workers');
 
     footer = `
       <div class="biz-timer-wrap">
@@ -296,7 +305,9 @@ function _renderBizCard(container, bizId) {
 
   card.innerHTML = `
     <div class="business-header">
-      <span class="business-emoji">${biz.emoji}</span>
+      ${biz.icon
+        ? `<img class="business-emoji business-icon-img" src="${biz.icon}" alt="">`
+        : `<span class="business-emoji">${biz.emoji}</span>`}
       <div class="business-info">
         <div class="business-name">${biz.name} ${vehicleBadge}</div>
         <div class="business-rate">${rateLabel}</div>

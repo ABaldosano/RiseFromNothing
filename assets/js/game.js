@@ -100,6 +100,7 @@ function initGame() {
   G.rafId = requestAnimationFrame(_tick);
   renderAll();
   if (G.offlineEarned > 0) showOfflineModal(G.offlineEarned);
+  _setupHoldToDump();
 
   const canvas = document.getElementById('world-canvas');
   if (canvas && window.WorldAPI) {
@@ -156,7 +157,7 @@ function interactWithBusiness() {
     return;
   }
   if (type === 'sweep_bin') {
-    depositSweepTrash();
+    if (!_holdActive) depositSweepTrash();
     return;
   }
 
@@ -436,6 +437,82 @@ function _calcBizIncome(bizId) {
     ? FLEET_LEVEL_MULT[G.fleetLevel[bizId] || 1]
     : 1;
   return Math.floor(base * workerMult * levelMult * fleetMult);
+}
+
+// ── Hold-to-Dump (sweep bin) ─────────────────────────────────
+const DUMP_ALL_HOLD_MS = 1000;
+const DUMP_TICK_MS     = 140;
+let _holdTimer  = null;
+let _holdStart  = 0;
+let _holdDone   = false;
+let _holdActive = false;
+
+function _startBinHold() {
+  if (G.paused || _holdTimer) return;
+  const btn = document.getElementById('interact-btn');
+  if (!btn || btn.dataset.type !== 'sweep_bin') return;
+  _holdActive = true;
+  _holdStart  = Date.now();
+  _holdDone   = false;
+  _binHoldTick();
+  _holdTimer = setInterval(_binHoldTick, DUMP_TICK_MS);
+}
+
+function _binHoldTick() {
+  const btn = document.getElementById('interact-btn');
+  if (G.paused || _holdDone || !G.sweepTask || G.sweepCarry <= 0 || !btn || btn.dataset.type !== 'sweep_bin') {
+    _stopBinHold();
+    return;
+  }
+  if (Date.now() - _holdStart >= DUMP_ALL_HOLD_MS) {
+    _holdDone = true;
+    dumpAllSweepTrash();
+    _stopBinHold();
+    return;
+  }
+  depositSweepTrash();
+}
+
+function _stopBinHold() {
+  if (_holdTimer) { clearInterval(_holdTimer); _holdTimer = null; }
+  setTimeout(() => { _holdActive = false; }, 250);
+}
+
+function dumpAllSweepTrash() {
+  if (G.paused || !G.sweepTask || G.sweepCarry <= 0) return;
+  const count = G.sweepCarry;
+  for (let i = 0; i < count; i++) {
+    G.sweepTask.deposited++;
+    _addCapital(_sweepItemReward(G.sweepTask.type));
+  }
+  G.sweepCarry = 0;
+  playDumpAll();
+  spawnFloat('DUMPED ALL!', document.getElementById('interact-btn'));
+  window.WorldAPI?.setCarryCount(0);
+
+  saveGame(G);
+  renderStats();
+  renderJobSection();
+
+  if (G.sweepTask.collected >= G.sweepTask.total && G.sweepCarry === 0) {
+    completeSweepTask();
+  }
+}
+
+function _setupHoldToDump() {
+  const btn = document.getElementById('interact-btn');
+  if (btn) {
+    btn.addEventListener('pointerdown', _startBinHold);
+    btn.addEventListener('pointerup', _stopBinHold);
+    btn.addEventListener('pointercancel', _stopBinHold);
+    btn.addEventListener('pointerleave', _stopBinHold);
+  }
+  window.addEventListener('keydown', e => {
+    if (e.key.toLowerCase() === 'e') _startBinHold();
+  });
+  window.addEventListener('keyup', e => {
+    if (e.key.toLowerCase() === 'e') _stopBinHold();
+  });
 }
 
 // ── Helpers ───────────────────────────────────────────────────
