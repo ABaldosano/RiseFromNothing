@@ -51,7 +51,11 @@ html, body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
   overflow: hidden;
+  overscroll-behavior: none;
   touch-action: none;
 }
 
@@ -93,7 +97,7 @@ body::before {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  padding: 10px 12px;
+  padding: calc(10px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 10px calc(12px + env(safe-area-inset-left));
   gap: 8px;
   pointer-events: none;
   z-index: 50;
@@ -243,8 +247,8 @@ body::before {
 
 #joystick-base {
   position: absolute;
-  left: 18px;
-  bottom: 18px;
+  left: calc(18px + env(safe-area-inset-left));
+  bottom: calc(18px + env(safe-area-inset-bottom));
   width: var(--joystick-size);
   height: var(--joystick-size);
   border-radius: 50%;
@@ -294,8 +298,8 @@ body::before {
 
 /* Right cluster: RUN bottom-right, JUMP above-left */
 #run-btn {
-  right: 18px;
-  bottom: 18px;
+  right: calc(18px + env(safe-area-inset-right));
+  bottom: calc(18px + env(safe-area-inset-bottom));
 }
 
 #run-btn.active {
@@ -306,8 +310,8 @@ body::before {
 }
 
 #jump-btn {
-  right: 96px;
-  bottom: 52px;
+  right: calc(96px + env(safe-area-inset-right));
+  bottom: calc(52px + env(safe-area-inset-bottom));
   font-size: 11px;
   color: var(--blue);
   border-color: rgba(68,138,255,0.3);
@@ -320,8 +324,8 @@ body::before {
 }
 
 #interact-btn {
-  right: 18px;
-  bottom: 100px;
+  right: calc(18px + env(safe-area-inset-right));
+  bottom: calc(100px + env(safe-area-inset-bottom));
   font-size: 20px;
   border-color: var(--green-dim);
   color: var(--green);
@@ -420,6 +424,7 @@ body::before {
   border: 2px solid var(--border2);
   border-radius: var(--radius);
   overflow: hidden;
+  flex-shrink: 0;
   box-shadow: 0 4px 20px rgba(0,0,0,0.35);
 }
 
@@ -1294,6 +1299,7 @@ body::before {
   z-index: 120 !important;
   display: flex;
   flex-direction: column;
+  overflow: hidden !important;
 }
 #panel-sheet.open {
   transform: translateY(0) !important;
@@ -1341,6 +1347,7 @@ body::before {
 
 #game-main {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   padding: 8px 16px 80px;

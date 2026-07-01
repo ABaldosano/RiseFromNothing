@@ -87,7 +87,7 @@ function initGame() {
     G.fleetLevel       = saved.fleetLevel       ?? {};
 
     if (saved.savedAt && G.ownedBusinesses.length > 0) {
-      const offline = calcOfflineEarnings(G.ownedBusinesses, saved.savedAt, G.workers, G.workerLevel);
+      const offline = calcOfflineEarnings(G.ownedBusinesses, saved.savedAt, G.workers, G.workerLevel, G.fleetLevel);
       if (offline > 0) {
         G.capital      += offline;
         G.offlineEarned = offline;
@@ -106,6 +106,17 @@ function initGame() {
     window.WorldAPI.init(canvas, G, BUSINESSES, BIZ_ORDER);
     window.WorldAPI.setInteractCallback(_onInteractChange);
   }
+
+  // Mobile: auto-pause and save when the tab/app is backgrounded so
+  // throttled timers can't drift or double-fire on return.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      saveGame(G);
+      if (!G.paused) pauseGame();
+    }
+  });
+  window.addEventListener('pagehide', () => saveGame(G));
+  window.addEventListener('beforeunload', () => saveGame(G));
 }
 
 // ── World UI hooks ────────────────────────────────────────────

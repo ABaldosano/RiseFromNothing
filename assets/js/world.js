@@ -1511,7 +1511,7 @@ function setupInput() {
       joyVec.x = dx / radius; joyVec.z = dy / radius;
     };
     const onEnd = () => { dragging = false; knob.style.transform = 'translate(-50%, -50%)'; joyVec.x = 0; joyVec.z = 0; };
-    base.addEventListener('pointerdown',   e => { dragging = true; onMove(e.clientX, e.clientY); base.setPointerCapture(e.pointerId); });
+    base.addEventListener('pointerdown',   e => { e.preventDefault(); dragging = true; onMove(e.clientX, e.clientY); base.setPointerCapture(e.pointerId); });
     base.addEventListener('pointermove',   e => { if (dragging) onMove(e.clientX, e.clientY); });
     base.addEventListener('pointerup',     onEnd);
     base.addEventListener('pointercancel', onEnd);
@@ -1520,7 +1520,7 @@ function setupInput() {
   const runBtn = document.getElementById('run-btn');
   if (runBtn) {
     const setRun = v => { inputState.run = v; runBtn.classList.toggle('active', v); };
-    runBtn.addEventListener('pointerdown',  () => setRun(true));
+    runBtn.addEventListener('pointerdown',  e => { e.preventDefault(); setRun(true); });
     runBtn.addEventListener('pointerup',    () => setRun(false));
     runBtn.addEventListener('pointercancel',() => setRun(false));
     runBtn.addEventListener('pointerleave', () => setRun(false));
@@ -1623,12 +1623,18 @@ function setupInput() {
     }
   }
 
-  let _wasDrag = false, _downX = 0, _downY = 0;
+  let _wasDrag = false, _downX = 0, _downY = 0, _touchHandled = false;
   canvasEl.addEventListener('pointerdown', e => { _wasDrag = false; _downX = e.clientX; _downY = e.clientY; });
   canvasEl.addEventListener('pointermove', e => { if (Math.hypot(e.clientX - _downX, e.clientY - _downY) > 5) _wasDrag = true; });
-  canvasEl.addEventListener('click', e => { if (!_wasDrag) _tryInteract(e.clientX, e.clientY); });
+  canvasEl.addEventListener('click', e => {
+    // Skip: this tap was already handled by touchend just above (avoids
+    // the browser's synthetic ~300ms ghost click firing the same action twice).
+    if (_touchHandled) { _touchHandled = false; return; }
+    if (!_wasDrag) _tryInteract(e.clientX, e.clientY);
+  });
   canvasEl.addEventListener('touchend', e => {
     if (e.changedTouches.length === 1 && !_wasDrag) {
+      _touchHandled = true;
       const t = e.changedTouches[0]; _tryInteract(t.clientX, t.clientY);
     }
   });
